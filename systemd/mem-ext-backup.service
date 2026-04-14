@@ -1,0 +1,13 @@
+[Unit]
+Description=claude-mem-ext daily backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/claude-mem-ext
+Environment=PYTHONPATH=%h/projects/claude-mem-ext
+ExecStart=%h/.claude-mem/semantic-env/bin/python -m mem_ext.cli backup
+Nice=19
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target

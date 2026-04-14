@@ -12,15 +12,39 @@ Extensions over [claude-mem](https://github.com/thedotmack/claude-mem):
 - **Golden eval**: 17/21 queries passed (81%), avg precision@10 = 0.586.
 - Known failures: all 4 involve exact-name tokens (webshell, IP, token, product name) — semantic alone misses them. Hybrid BM25+semantic (M2) expected to fix.
 
-## Run eval
+## CLI
 
-    ~/.claude-mem/semantic-env/bin/python -m mem_ext.eval.run
+    mem-ext sync      # incremental ingest + embed (idempotent, ~2s)
+    mem-ext status    # health + drift report
+    mem-ext search "query"
+    mem-ext backup    # tarball of SQLite + Chroma
+    mem-ext eval      # golden eval, hybrid mode
+
+Shortcut:
+
+    $HOME/.claude-mem/semantic-env/bin/python -m mem_ext.cli <cmd>
+
+## Automation
+
+systemd user timers installed in `~/.config/systemd/user/`:
+- `mem-ext-sync.timer` — every 30 min
+- `mem-ext-backup.timer` — daily
+
+## Current (M5)
+
+- Corpus: 46170 turns / 931 sessions / 9802 user_prompts
+- Chroma: 43825 embeddings (drift = short turns filtered)
+- Eval: 21/21 (100%), p@10 = 0.776
+- Backups: `~/claude-mem-backups/` (keeps last 10)
 
 ## Layout
 
     mem_ext/
-      ingest/     # jsonl parsers (claude, subagent, codex)
-      indexers/   # chroma writer, chunking, incremental
-      search/     # bm25, semantic, hybrid, rerank
-      eval/       # golden.yaml + run.py
-      daemon/     # long-running HTTP/MCP server
+      ingest/          # jsonl parsers (claude, subagent, codex) + incremental
+      indexers/        # chroma writer, incremental embed
+      search/          # bm25, semantic, hybrid RRF
+      eval/            # golden.yaml + run.py
+      daemon/          # MCP stdio server (registered as 'mem-ext')
+      cli.py           # unified CLI
+      backup.py        # safe SQLite .backup + tar
+      db.py            # migration runner
