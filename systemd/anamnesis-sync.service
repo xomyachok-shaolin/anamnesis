@@ -1,11 +1,11 @@
 [Unit]
-Description=claude-anamnesis incremental sync
+Description=anamnesis incremental sync
 After=default.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/projects/claude-anamnesis
-Environment=PYTHONPATH=%h/projects/claude-anamnesis
+WorkingDirectory=%h/projects/anamnesis
+Environment=PYTHONPATH=%h/projects/anamnesis
 ExecStart=%h/.claude-mem/semantic-env/bin/python -m anamnesis.cli sync
 
 # --- resource limits ---

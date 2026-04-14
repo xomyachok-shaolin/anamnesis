@@ -1,10 +1,10 @@
 [Unit]
-Description=claude-anamnesis daily backup
+Description=anamnesis daily backup
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/projects/claude-anamnesis
-Environment=PYTHONPATH=%h/projects/claude-anamnesis
+WorkingDirectory=%h/projects/anamnesis
+Environment=PYTHONPATH=%h/projects/anamnesis
 ExecStart=%h/.claude-mem/semantic-env/bin/python -m anamnesis.cli backup
 
 # --- resource limits ---

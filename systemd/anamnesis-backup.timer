@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily claude-anamnesis backup
+Description=Daily anamnesis backup
 
 [Timer]
 OnCalendar=daily

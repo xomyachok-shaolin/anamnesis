@@ -1,5 +1,5 @@
 [Unit]
-Description=Run claude-anamnesis sync every 30 minutes
+Description=Run anamnesis sync every 30 minutes
 
 [Timer]
 OnBootSec=5min
