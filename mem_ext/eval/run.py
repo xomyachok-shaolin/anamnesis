@@ -35,14 +35,19 @@ def get_collection():
     return chromadb.PersistentClient(path=CHROMA_DIR).get_collection(COLL)
 
 
-def evaluate(queries, top_k=10, role="any"):
-    emb = get_embedder()
-    col = get_collection()
-
+def evaluate(queries, top_k=10, role="any", mode="semantic"):
     total_passed = 0
     total_queries = len(queries)
     hits_at_k = []
     results_detail = []
+
+    if mode == "semantic":
+        emb = get_embedder()
+        col = get_collection()
+    elif mode == "hybrid":
+        from mem_ext.db import connect
+        from mem_ext.search.hybrid import search as hybrid_search
+        conn = connect()
 
     for q in queries:
         query = q["query"]
@@ -51,10 +56,15 @@ def evaluate(queries, top_k=10, role="any"):
         k = q.get("top_k", top_k)
         r = q.get("role", role)
 
-        vec = list(emb.embed([query]))[0].tolist()
-        where = {"role": r} if r in ("user", "assistant") else None
-        res = col.query(query_embeddings=[vec], n_results=k, where=where)
-        docs = res["documents"][0] if res["documents"] else []
+        if mode == "semantic":
+            vec = list(emb.embed([query]))[0].tolist()
+            where = {"role": r} if r in ("user", "assistant") else None
+            res = col.query(query_embeddings=[vec], n_results=k, where=where)
+            docs = res["documents"][0] if res["documents"] else []
+        elif mode == "hybrid":
+            rl = r if r in ("user", "assistant") else None
+            hits = hybrid_search(conn, query, top_k=k, pool=50, role=rl)
+            docs = [h.text for h in hits]
 
         matches = 0
         matched_ranks = []
@@ -93,14 +103,15 @@ def main():
     ap.add_argument("--top-k", type=int, default=10)
     ap.add_argument("--role", default="any")
     ap.add_argument("--golden", default=None)
+    ap.add_argument("--mode", choices=["semantic", "hybrid"], default="semantic")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
     golden_path = args.golden or str(Path(__file__).parent / "golden.yaml")
     queries = load_golden(golden_path)
-    result = evaluate(queries, top_k=args.top_k, role=args.role)
+    result = evaluate(queries, top_k=args.top_k, role=args.role, mode=args.mode)
 
-    print(f"=== Eval: {result['total_passed']}/{result['total_queries']} passed "
+    print(f"=== Eval [{args.mode}]: {result['total_passed']}/{result['total_queries']} passed "
           f"({result['pass_rate']:.0%}), avg precision@{args.top_k} = {result['avg_precision_at_k']:.3f}")
     print()
     for d in result["details"]:
