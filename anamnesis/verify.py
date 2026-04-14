@@ -1,8 +1,8 @@
 """Integrity and consistency checks."""
 import os
 
-from mem_ext.config import CHROMA_DIR, CHROMA_COLLECTION
-from mem_ext.db import connect
+from anamnesis.config import CHROMA_DIR, CHROMA_COLLECTION
+from anamnesis.db import connect
 
 
 def _chroma_count() -> int | None:
@@ -39,7 +39,7 @@ def run() -> dict:
     # 3. Counts
     turns = cur.execute("SELECT COUNT(*) FROM historical_turns").fetchone()[0]
     embedded = cur.execute(
-        "SELECT COUNT(*) FROM ext_embed_state WHERE collection=?",
+        "SELECT COUNT(*) FROM anamnesis_embed_state WHERE collection=?",
         (CHROMA_COLLECTION,),
     ).fetchone()[0]
     chroma = _chroma_count()
@@ -62,14 +62,14 @@ def run() -> dict:
     # 5. Orphaned embed_state rows (turn was deleted but embed_state remains)
     orphan_embed = cur.execute(
         """
-        SELECT COUNT(*) FROM ext_embed_state es
+        SELECT COUNT(*) FROM anamnesis_embed_state es
         LEFT JOIN historical_turns ht ON ht.id = es.turn_id
         WHERE ht.id IS NULL
         """
     ).fetchone()[0]
     checks["orphan_embed_state"] = orphan_embed
     if orphan_embed:
-        issues.append(f"{orphan_embed} orphaned ext_embed_state rows")
+        issues.append(f"{orphan_embed} orphaned anamnesis_embed_state rows")
 
     # 6. Orphaned user_prompts (missing sdk_sessions parent)
     orphan_prompts = cur.execute(
@@ -87,7 +87,7 @@ def run() -> dict:
     missing_embed = cur.execute(
         """
         SELECT COUNT(*) FROM historical_turns ht
-        LEFT JOIN ext_embed_state es ON es.turn_id = ht.id AND es.collection = ?
+        LEFT JOIN anamnesis_embed_state es ON es.turn_id = ht.id AND es.collection = ?
         WHERE es.turn_id IS NULL AND length(ht.text) > 15
         """,
         (CHROMA_COLLECTION,),

@@ -10,7 +10,7 @@ import tarfile
 import time
 from pathlib import Path
 
-from mem_ext.config import DB_PATH, CHROMA_DIR, BACKUP_ROOT, BACKUP_KEEP_LAST
+from anamnesis.config import DB_PATH, CHROMA_DIR, BACKUP_ROOT, BACKUP_KEEP_LAST
 
 KEEP_LAST = BACKUP_KEEP_LAST
 

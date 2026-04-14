@@ -1,4 +1,4 @@
-# claude-mem-ext
+# anamnesis
 
 Extensions over [claude-mem](https://github.com/thedotmack/claude-mem):
 - Historical backfill for Claude Code + subagents + Codex sessions.
@@ -14,37 +14,37 @@ Extensions over [claude-mem](https://github.com/thedotmack/claude-mem):
 
 ## CLI
 
-    mem-ext sync      # incremental ingest + embed (idempotent, ~2s)
-    mem-ext status    # health + drift report
-    mem-ext search "query"
-    mem-ext backup    # tarball of SQLite + Chroma
-    mem-ext eval      # golden eval, hybrid mode
+    anamnesis sync      # incremental ingest + embed (idempotent, ~2s)
+    anamnesis status    # health + drift report
+    anamnesis search "query"
+    anamnesis backup    # tarball of SQLite + Chroma
+    anamnesis eval      # golden eval, hybrid mode
 
 Shortcut:
 
-    $HOME/.claude-mem/semantic-env/bin/python -m mem_ext.cli <cmd>
+    $HOME/.claude-mem/semantic-env/bin/python -m anamnesis.cli <cmd>
 
 ## Automation
 
 systemd user timers installed in `~/.config/systemd/user/`:
-- `mem-ext-sync.timer` — every 30 min
-- `mem-ext-backup.timer` — daily
+- `anamnesis-sync.timer` — every 30 min
+- `anamnesis-backup.timer` — daily
 
 ## Current (M5)
 
 - Corpus: 46170 turns / 931 sessions / 9802 user_prompts
 - Chroma: 43825 embeddings (drift = short turns filtered)
 - Eval: 21/21 (100%), p@10 = 0.776
-- Backups: `~/claude-mem-backups/` (keeps last 10)
+- Backups: `~/anamnesis-backups/` (keeps last 10)
 
 ## Layout
 
-    mem_ext/
+    anamnesis/
       ingest/          # jsonl parsers (claude, subagent, codex) + incremental
       indexers/        # chroma writer, incremental embed
       search/          # bm25, semantic, hybrid RRF
       eval/            # golden.yaml + run.py
-      daemon/          # MCP stdio server (registered as 'mem-ext')
+      daemon/          # MCP stdio server (registered as 'anamnesis')
       cli.py           # unified CLI
       backup.py        # safe SQLite .backup + tar
       db.py            # migration runner

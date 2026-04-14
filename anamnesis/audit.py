@@ -3,15 +3,15 @@ import json
 import time
 from contextlib import contextmanager
 
-from mem_ext.config import HEALTH_FILE
-from mem_ext.db import connect
+from anamnesis.config import HEALTH_FILE
+from anamnesis.db import connect
 
 
 def write_audit(action: str, status: str, duration_sec: float | None, details: dict):
     conn = connect()
     try:
         conn.execute(
-            "INSERT INTO ext_audit(action, status, duration_sec, details) "
+            "INSERT INTO anamnesis_audit(action, status, duration_sec, details) "
             "VALUES (?, ?, ?, ?)",
             (action, status, duration_sec, json.dumps(details, ensure_ascii=False)),
         )
@@ -50,7 +50,7 @@ def recent(limit: int = 20) -> list[dict]:
     try:
         rows = conn.execute(
             "SELECT at, action, status, duration_sec, details "
-            "FROM ext_audit ORDER BY id DESC LIMIT ?",
+            "FROM anamnesis_audit ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
         return [

@@ -1,7 +1,7 @@
 """Restore claude-mem data from a backup tarball.
 
 Usage:
-    mem-ext restore <path/to/claude-mem-YYYYMMDD-HHMMSS.tar.gz>
+    anamnesis restore <path/to/claude-mem-YYYYMMDD-HHMMSS.tar.gz>
 
 Safety:
 - Refuses to overwrite unless --force is passed.
@@ -15,7 +15,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from mem_ext.config import CHROMA_DIR, DB_PATH, DATA_DIR
+from anamnesis.config import CHROMA_DIR, DB_PATH, DATA_DIR
 
 
 def run(tarball: str, force: bool = False) -> dict:

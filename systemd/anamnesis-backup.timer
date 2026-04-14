@@ -1,11 +1,11 @@
 [Unit]
-Description=Daily claude-mem-ext backup
+Description=Daily claude-anamnesis backup
 
 [Timer]
 OnCalendar=daily
 Persistent=true
 RandomizedDelaySec=30min
-Unit=mem-ext-backup.service
+Unit=anamnesis-backup.service
 
 [Install]
 WantedBy=timers.target

@@ -1,11 +1,11 @@
 [Unit]
-Description=Run claude-mem-ext sync every 30 minutes
+Description=Run claude-anamnesis sync every 30 minutes
 
 [Timer]
 OnBootSec=5min
 OnUnitActiveSec=30min
 Persistent=true
-Unit=mem-ext-sync.service
+Unit=anamnesis-sync.service
 
 [Install]
 WantedBy=timers.target

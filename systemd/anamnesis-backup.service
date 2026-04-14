@@ -1,11 +1,11 @@
 [Unit]
-Description=claude-mem-ext daily backup
+Description=claude-anamnesis daily backup
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/projects/claude-mem-ext
-Environment=PYTHONPATH=%h/projects/claude-mem-ext
-ExecStart=%h/.claude-mem/semantic-env/bin/python -m mem_ext.cli backup
+WorkingDirectory=%h/projects/claude-anamnesis
+Environment=PYTHONPATH=%h/projects/claude-anamnesis
+ExecStart=%h/.claude-mem/semantic-env/bin/python -m anamnesis.cli backup
 
 # --- resource limits ---
 MemoryMax=1G

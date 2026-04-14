@@ -1,6 +1,6 @@
 """Incremental ingest: detect new/changed jsonl files by mtime, parse, upsert.
 
-Reuses parsers from backfill_v2.py. Uses ext_ingest_state to skip unchanged
+Reuses parsers from backfill_v2.py. Uses anamnesis_ingest_state to skip unchanged
 files on repeat runs. Safe to run on a timer.
 """
 import os
@@ -12,7 +12,7 @@ from glob import glob
 sys.path.insert(0, os.path.expanduser("~/.claude-mem"))
 from backfill_v2 import parse_claude_jsonl, parse_codex_jsonl, ts_to_epoch  # noqa: E402
 
-from mem_ext.db import connect  # noqa: E402
+from anamnesis.db import connect  # noqa: E402
 
 CC_ROOT = os.path.expanduser("~/.claude/projects")
 CODEX_ROOT = os.path.expanduser("~/.codex/sessions")
@@ -30,7 +30,7 @@ def _discover():
 
 def _needs_ingest(cur, source, path, mtime_ns):
     row = cur.execute(
-        "SELECT mtime_ns FROM ext_ingest_state WHERE source=? AND path=?",
+        "SELECT mtime_ns FROM anamnesis_ingest_state WHERE source=? AND path=?",
         (source, path),
     ).fetchone()
     if row is None:
@@ -41,7 +41,7 @@ def _needs_ingest(cur, source, path, mtime_ns):
 def _mark_ingested(cur, source, path, mtime_ns, turns):
     cur.execute(
         """
-        INSERT INTO ext_ingest_state(source, path, mtime_ns, ingested_at, turns)
+        INSERT INTO anamnesis_ingest_state(source, path, mtime_ns, ingested_at, turns)
         VALUES (?, ?, ?, datetime('now'), ?)
         ON CONFLICT(source, path) DO UPDATE
         SET mtime_ns=excluded.mtime_ns,

@@ -1,13 +1,13 @@
 """Incremental embedding: embed historical_turns rows missing from Chroma.
 
-Uses ext_embed_state to skip already-embedded turns. Safe to run on a timer
+Uses anamnesis_embed_state to skip already-embedded turns. Safe to run on a timer
 after ingest.incremental.
 """
 import os
 import sys
 import time
 
-from mem_ext.db import connect
+from anamnesis.db import connect
 
 DATA = os.path.expanduser("~/.claude-mem")
 CHROMA_DIR = f"{DATA}/semantic-chroma"
@@ -34,13 +34,13 @@ def run(batch_size=64, limit=None, verbose=False):
     cur = conn.cursor()
     col = _chroma_col()
 
-    # Turns not yet in ext_embed_state for this collection
+    # Turns not yet in anamnesis_embed_state for this collection
     q = """
         SELECT ht.id, ht.content_session_id, ht.turn_number, ht.role, ht.text,
                ht.timestamp, ht.platform_source,
                s.project, s.custom_title
         FROM historical_turns ht
-        LEFT JOIN ext_embed_state es ON es.turn_id = ht.id AND es.collection = ?
+        LEFT JOIN anamnesis_embed_state es ON es.turn_id = ht.id AND es.collection = ?
         LEFT JOIN sdk_sessions s ON s.content_session_id = ht.content_session_id
         WHERE es.turn_id IS NULL AND length(ht.text) > 15
         ORDER BY ht.id
@@ -74,7 +74,7 @@ def run(batch_size=64, limit=None, verbose=False):
         )
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         cur.executemany(
-            "INSERT OR REPLACE INTO ext_embed_state(turn_id, collection, embedded_at) "
+            "INSERT OR REPLACE INTO anamnesis_embed_state(turn_id, collection, embedded_at) "
             "VALUES (?, ?, ?)",
             [(tid, COLL, now) for tid in buf_turn_ids],
         )

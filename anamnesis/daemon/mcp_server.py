@@ -9,15 +9,15 @@ Tools:
   - mem_stats() → corpus statistics
 
 Run standalone for smoke test:
-  python -m mem_ext.daemon.mcp_server
+  python -m anamnesis.daemon.mcp_server
 
 Claude Code config (add to ~/.claude.json or via `claude mcp add`):
   {
     "mcpServers": {
-      "mem-ext": {
+      "anamnesis": {
         "command": "$HOME/.claude-mem/semantic-env/bin/python",
-        "args": ["-m", "mem_ext.daemon.mcp_server"],
-        "env": {"PYTHONPATH": "$HOME/projects/claude-mem-ext"}
+        "args": ["-m", "anamnesis.daemon.mcp_server"],
+        "env": {"PYTHONPATH": "$HOME/projects/claude-anamnesis"}
       }
     }
   }
@@ -29,8 +29,8 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from mem_ext.db import connect
-from mem_ext.search.hybrid import (
+from anamnesis.db import connect
+from anamnesis.search.hybrid import (
     _embedder,
     _chroma_col,
     search as hybrid_search,
@@ -48,15 +48,15 @@ _COL = None
 def _init():
     global _EMB, _COL
     if _EMB is None:
-        print("[mem-ext] loading embedder + Chroma...", file=sys.stderr)
+        print("[anamnesis] loading embedder + Chroma...", file=sys.stderr)
         _EMB = _embedder()
         _COL = _chroma_col()
         # warm up: first embed call compiles the ONNX graph
         list(_EMB.embed(["warmup"]))
-        print("[mem-ext] ready", file=sys.stderr)
+        print("[anamnesis] ready", file=sys.stderr)
 
 
-mcp = FastMCP("mem-ext")
+mcp = FastMCP("anamnesis")
 
 
 @mcp.tool()

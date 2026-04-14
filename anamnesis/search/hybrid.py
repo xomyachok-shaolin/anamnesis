@@ -201,10 +201,10 @@ def format_hit(h: Hit) -> str:
 
 if __name__ == "__main__":
     import sys
-    from mem_ext.db import connect
+    from anamnesis.db import connect
 
     if len(sys.argv) < 2:
-        print("Usage: python -m mem_ext.search.hybrid <query> [top_k] [role]")
+        print("Usage: python -m anamnesis.search.hybrid <query> [top_k] [role]")
         sys.exit(1)
     q = sys.argv[1]
     tk = int(sys.argv[2]) if len(sys.argv) > 2 else 10

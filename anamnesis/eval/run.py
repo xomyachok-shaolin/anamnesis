@@ -3,7 +3,7 @@
 Evaluate semantic index against golden.yaml.
 
 Usage:
-  python -m mem_ext.eval.run [--top-k 10] [--role any|user|assistant]
+  python -m anamnesis.eval.run [--top-k 10] [--role any|user|assistant]
 
 Prints per-query precision and overall score.
 Exits non-zero if any query fails its min_hits threshold.
@@ -45,8 +45,8 @@ def evaluate(queries, top_k=10, role="any", mode="semantic"):
         emb = get_embedder()
         col = get_collection()
     elif mode == "hybrid":
-        from mem_ext.db import connect
-        from mem_ext.search.hybrid import search as hybrid_search
+        from anamnesis.db import connect
+        from anamnesis.search.hybrid import search as hybrid_search
         conn = connect()
 
     for q in queries:

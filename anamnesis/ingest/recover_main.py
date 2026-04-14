@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.expanduser("~/.claude-mem"))
 from backfill_v2 import parse_claude_jsonl, ts_to_epoch  # noqa: E402
 
-from mem_ext.db import connect  # noqa: E402
+from anamnesis.db import connect  # noqa: E402
 
 CC_ROOT = os.path.expanduser("~/.claude/projects")
 

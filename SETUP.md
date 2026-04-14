@@ -1,85 +1,90 @@
-# Персистентная семантическая память для Claude Code + Codex
+# Персистентная память для AI-CLI сессий
 
-Пошаговая инструкция. На выходе:
+Система, которая собирает историю разговоров с CLI-агентами (Claude Code, Codex, и в принципе любой агент, пишущий turn-based jsonl) в единый корпус, даёт по нему гибридный поиск и отдаёт его нативно обратно в те же клиенты через MCP.
 
-- SQLite + Chroma с полным архивом прошлых сессий Claude Code (main + subagents) и Codex CLI.
-- Hybrid поиск (BM25 FTS5 + semantic RRF) по всему архиву.
-- MCP-инструменты (`mem_search`, `mem_get_turn`, `mem_get_session`, `mem_stats`), доступные нативно из Claude Code и Codex.
-- Авто-синк новых сессий и авто-бэкап через systemd user-таймеры.
-- Команда `mem-ext restore` для отката и переезда на другую машину.
+На выходе:
 
-Платформа: Linux с `systemd` в user-режиме. Всё работает offline (embedding — локальный ONNX).
+- Единая SQLite-база + векторный индекс Chroma со всей историей независимо от клиента.
+- Hybrid-поиск: BM25 (точные токены) + семантика (ONNX multilingual) + RRF-fusion.
+- MCP-инструменты (`mem_search`, `mem_get_turn`, `mem_get_session`, `mem_stats`), доступные в любом MCP-совместимом клиенте.
+- Инкрементальный sync новых сессий и ежедневные бэкапы через systemd user-таймеры.
+- Команда `anamnesis restore` для отката и переезда на другую машину.
+
+Платформа: Linux с `systemd` user-режима. Всё работает offline, embedding — локальный ONNX.
 
 ---
 
-## 0. Подход: как собрать всё прошлое и что с ним делать
+## 0. Подход
 
-### Что считается «прошлым»
+### Архитектурная позиция
 
-Три класса источников, которые лежат в пользовательской `$HOME` в виде jsonl'ов:
+Это **агент-нейтральный слой поверх jsonl-транскриптов**. Любой CLI-агент, который сохраняет диалог в формате «один файл = одна сессия, каждая реплика — отдельная строка», подключается через собственный парсер. Сегодня поддержаны два источника — **Claude Code** (main + subagent jsonl) и **Codex CLI**. Добавление третьего (Aider, Cursor agent, collective, свой собственный CLI) — это написать парсер и указать его директорию в конфиге.
+
+Поверх собранного корпуса живут **три слоя поиска** и **три контура эксплуатации**, одинаковые для всех источников.
+
+### Источники
 
 - **Claude Code main-сессии** — `~/.claude/projects/<cwd-slug>/<session-uuid>.jsonl`. По одному файлу на верхнеуровневую сессию.
-- **Claude Code sub-agent транскрипты** — `~/.claude/projects/<cwd-slug>/<session-uuid>/subagents/*.jsonl`. Отдельные файлы на каждый запуск Explore / Plan / general subagent'а — их **часто больше, чем основных**, и они содержат наиболее содержательную аналитическую работу.
-- **Codex CLI сессии** — `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. Другой формат: `type: session_meta | response_item`, content — Python-repr строка.
+- **Claude Code sub-agent транскрипты** — `~/.claude/projects/<cwd-slug>/<session-uuid>/subagents/*.jsonl`. Отдельные файлы на каждый запуск Explore / Plan / general-агента. Часто их в разы больше, чем main-сессий, и именно в них лежит содержательная аналитика.
+- **Codex CLI сессии** — `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`. Другой формат: события `session_meta | turn_context | response_item | event_msg`, content как Python-repr строка.
 
-Все три источника должны быть собраны в **один унифицированный корпус**, иначе поиск будет ходить только по части истории.
+Если собирать только один из источников — теряешь параллельный трек работы. Задача — привести гетерогенные форматы к одной схеме, сохраняя метку источника (`platform_source`) для фильтрации и аудита.
 
-### Стратегия сбора
+### Принцип сбора
 
-1. **Инвентаризация по glob'у** — пройти по всем трём директориям, собрать список jsonl-файлов с их `mtime_ns`.
-2. **Парсинг под формат источника** — два парсера: один для Claude Code (одинаковый для main и subagent; отличие — `isSidechain`/`agentId`), один для Codex (другой формат, `ast.literal_eval` для content).
-3. **UPSERT в SQLite** — одна схема для всех источников, метка `platform_source ∈ {claude, claude-subagent, codex}`. Идемпотентность через UNIQUE-индексы и `ON CONFLICT DO NOTHING`.
-4. **Tracking в `ext_ingest_state`** — по `(source, path) → mtime_ns`. Повторный прогон не перечитывает неизменённые файлы.
-5. **Recovery-скрипт для известной граблы** — если `claude-mem` ставили **до** нашего слоя, `sdk_sessions` могут содержать строки без соответствующих turns в `historical_turns`. Отдельный скрипт (`recover_main.py`) перечитывает jsonl для таких сессий и дозаливает.
+1. **Файл — единица идемпотентности.** Каждый jsonl описан в `ext_ingest_state` как `(source, path, mtime_ns)`. Повторный sync не перечитывает неизменённые файлы.
+2. **Turn — единица хранения.** Таблица `historical_turns` хранит каждую реплику (user + assistant) с UNIQUE-ключом `(content_session_id, turn_number)`. UPSERT через `ON CONFLICT DO NOTHING` гарантирует отсутствие дублей.
+3. **Формат — ответственность парсера.** Сейчас два парсера; добавление нового источника = новый парсер в `anamnesis/ingest/` + запись в `incremental.py::_discover()`.
+4. **Восстановление пропусков.** Если какая-то сессия попала в `sdk_sessions` без соответствующих `historical_turns` (такое бывает при миграции между версиями инструментов) — скрипт `recover_main` перечитывает jsonl для таких сессий и дозаливает.
 
-### Что дальше — зачем их собирать
+### Слои поверх корпуса
 
-Сырая коллекция — не продукт. Продукт — это три слоя поверх неё:
+1. **BM25 через SQLite FTS5** — для точных токенов: IP-адреса, CVE, имена файлов, коды ошибок, идентификаторы. Триггеры держат индекс в синке с базой.
+2. **Семантика через Chroma + ONNX multilingual** — для смысловых запросов на естественном языке. Модель по умолчанию `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, компромисс скорость / качество). Инкрементальный embedding: `ext_embed_state` отмечает, что уже в Chroma.
+3. **Hybrid через Reciprocal Rank Fusion** — объединяет ранги (не скоры — у них разные шкалы) по формуле `score(d) = Σ 1 / (60 + rank_r(d))`. BM25 поднимает точные имена, семантика поднимает близкое по смыслу, RRF склеивает.
 
-1. **BM25 (FTS5)** поверх `historical_turns.text` — находит точные токены, которые семантика упускает: IP-адреса, CVE, имена файлов, идентификаторы, код ошибок. Индекс строится через SQLite unicode61 tokenizer; триггеры держат его в синке с базовой таблицей.
+Результаты — не текст, а **адресуемые объекты**: `turn_id`, `session_id`, `turn_number`, `timestamp`, `platform_source`. Окрестность поднимается через `mem_get_turn(turn_id, context=N)`, обзор сессии — через `mem_get_session(session_id)`.
 
-2. **Семантика (Chroma + ONNX multilingual embedding)** — находит смысл через расстояние в 384-мерном пространстве. Модель `paraphrase-multilingual-MiniLM-L12-v2` выбрана как компромисс между качеством на русском техническом и скоростью/весом. Инкрементальное эмбеддинг: `ext_embed_state` отмечает, какие turns уже в Chroma, чтобы пересчитывать только новые.
+### Точки входа
 
-3. **Гибрид через Reciprocal Rank Fusion** — `score(d) = Σ 1 / (60 + rank_r(d))` по рангам из BM25 и семантики. Это не среднее скоров (разные шкалы), а среднее рангов. На практике даёт нужное: точные имена находит BM25, общие темы — семантика, оба канала поднимают релевантное вверх.
+Один stdio-MCP сервер обслуживает всех клиентов, которые понимают MCP:
 
-### Как этим пользуешься
+- Claude Code регистрирует его через `claude mcp add`.
+- Codex — через запись в `~/.codex/config.toml`.
+- Любой другой MCP-совместимый клиент — аналогично.
+- Модель (~220 МБ) загружается один раз при старте процесса; последующие запросы — миллисекунды.
 
-Не через CLI — через MCP-инструменты внутри того же клиента, где работаешь:
+Параллельно есть CLI (`anamnesis`) для эксплуатации: sync, verify, backup, restore, audit, eval.
 
-- Claude Code получает `mem_search` как стандартный tool,
-- Codex — тоже (регистрируется через `~/.codex/config.toml`),
-- Один процесс = один загруженный embedding model = все последующие запросы <100 мс.
+### Контуры эксплуатации
 
-Результаты поиска — не просто reply, а **источники**: session_id + turn_number + timestamp + source. Можно поднять полную окрестность через `mem_get_turn(turn_id, context=N)`. Это превращает историю в адресуемый граф, а не в текстовую свалку.
+- **Incremental sync** по mtime — systemd-таймер подхватывает новое без полной пересборки.
+- **Verify** — `PRAGMA integrity_check`, FTS rebuild, drift SQLite↔Chroma, orphans. Ловит деградацию до того, как мусор появится в результатах.
+- **Audit log** (`ext_audit`) — каждая операция с длительностью и JSON-payload'ом. Через полгода можно реконструировать, когда что сломалось.
+- **WAL-safe backup** — tarball с ротацией. `restore` откатывает атомарно с сохранением предыдущего состояния в `*.pre-restore-*`.
+- **Golden eval** — **твой** набор известных запросов с известными ответами. Без него нельзя сказать, стал ли поиск лучше или хуже после любого изменения.
 
-### Что удерживает систему в рабочем состоянии
+### Отношение к `claude-mem`
 
-- `mem-ext sync` — инкрементально подтягивает новые jsonl-ы и дозаливает их в Chroma. Запускается systemd-таймером.
-- `mem-ext verify` — PRAGMA integrity_check, FTS rebuild, drift между SQLite и Chroma, orphaned rows.
-- `mem-ext backup` — WAL-safe snapshot в tarball, ротация последних N.
-- `mem-ext restore` — обратная операция с сохранением предыдущего состояния в `*.pre-restore-<stamp>`.
-- `ext_audit` таблица — пишет каждую операцию с длительностью и payload'ом для forensics через полгода.
-- Golden eval — **твой** (не мой) набор известных запросов с известными ответами. Без него ты не знаешь, ухудшил ли что-то в системе очередной «улучшайзинг».
+`claude-mem` (плагин от thedotmack) создаёт базовую SQLite-схему и web-viewer; мы строим наш слой поверх его БД. Если пользуешься Claude Code — ставь его, получишь заодно живые хуки автозахвата. Если Claude Code нет, а нужен только Codex или другой клиент — можно пропустить установку плагина и создать базовую схему вручную (см. §3.1). Данные всё равно живут в `~/.claude-mem/` (имя директории — историческое, может быть переопределено через `ANAMNESIS_DATA_DIR`).
 
 ### Короткий маршрут
 
-1. Поставить зависимости (bun, uv, claude-mem, python venv).
+1. Поставить зависимости (Bun, uv, опционально claude-mem, Python venv).
 2. Клонировать репо, прогнать миграции.
-3. Если нужно — перенести свои jsonl'ы на текущую машину.
-4. Один раз `mem-ext sync` — собирает всё прошлое.
-5. Если видишь пропуски — `mem-ext recover_main`.
-6. Подключить MCP к обоим клиентам.
-7. Включить systemd-таймеры — дальше оно живёт само.
-
-Ниже — те же шаги подробнее.
+3. Перенести jsonl-ы на машину, если они уже есть где-то ещё.
+4. Один раз `anamnesis sync` — собрать всё прошлое.
+5. При пропусках (см. §16.1) — `recover_main`.
+6. Зарегистрировать MCP во всех клиентах, которые будешь использовать.
+7. Включить systemd-таймеры.
 
 ---
 
 ## 1. Предварительные требования
 
 - `python3 ≥ 3.10`, `git`, `curl`, `sqlite3`.
-- Claude Code CLI (`claude`) и/или Codex CLI (`codex`) установлены и авторизованы.
-- Свободное место: индекс занимает порядок 1% от суммарного размера твоих jsonl-ов плюс ~220 МБ модель и по ~200 МБ на каждый бэкап.
+- Хотя бы один CLI-агент, чьи сессии хочешь индексировать (Claude Code CLI `claude`, Codex CLI `codex`, или свой).
+- Свободное место: порядка 1% от суммарного размера jsonl плюс ~220 МБ модель и ~200 МБ на каждый бэкап.
 
 Проверка:
 
@@ -94,39 +99,89 @@ codex --version 2>/dev/null
 
 ## 2. Установить Bun и uv
 
-Bun нужен для worker'а `claude-mem`. uv — быстрый менеджер Python-зависимостей.
+Bun нужен, только если ставишь плагин `claude-mem` (он на Bun). uv — быстрый менеджер Python-зависимостей без torch.
 
 ```bash
 curl -fsSL https://bun.sh/install | bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
-bun --version
 uv --version
 ```
 
 ---
 
-## 3. Установить claude-mem
+## 3. Базовая SQLite-схема
+
+Два пути — через плагин `claude-mem` (рекомендуется, если используешь Claude Code) или вручную.
+
+### 3.a — через плагин (Claude Code есть)
 
 ```bash
 npx -y claude-mem@latest install
 ```
 
-Это:
-- кладёт плагин в `~/.claude/plugins/marketplaces/thedotmack/`,
-- создаёт `~/.claude-mem/` (SQLite + конфиг),
-- добавляет хуки автозахвата **будущих** сессий Claude Code в `~/.claude/settings.json`.
+Создаст `~/.claude-mem/claude-mem.db` с базовой схемой, положит плагин в `~/.claude/plugins/marketplaces/thedotmack/`, пропишет хуки автозахвата в `~/.claude/settings.json`.
 
-Запустить worker (держит web-viewer на `:37777`):
+Опционально — запустить worker (web-viewer на `:37777`):
 
 ```bash
 export PATH="$HOME/.bun/bin:$PATH"
 nohup npx claude-mem start > /tmp/claude-mem-worker.log 2>&1 &
 disown
-curl -sS http://localhost:37777/ | head -1   # должен вернуть <!DOCTYPE html>
 ```
 
-Если падает — смотри `~/.claude-mem/logs/`.
+### 3.b — вручную (Claude Code не используется)
+
+Создать директорию и пустую БД:
+
+```bash
+mkdir -p ~/.claude-mem
+sqlite3 ~/.claude-mem/claude-mem.db <<'SQL'
+CREATE TABLE IF NOT EXISTS sdk_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_session_id TEXT UNIQUE NOT NULL,
+    memory_session_id TEXT UNIQUE,
+    project TEXT NOT NULL,
+    platform_source TEXT NOT NULL DEFAULT 'claude',
+    user_prompt TEXT,
+    started_at TEXT NOT NULL,
+    started_at_epoch INTEGER NOT NULL,
+    completed_at TEXT,
+    completed_at_epoch INTEGER,
+    status TEXT CHECK(status IN ('active','completed','failed')) NOT NULL DEFAULT 'active',
+    worker_port INTEGER,
+    prompt_counter INTEGER DEFAULT 0,
+    custom_title TEXT
+);
+CREATE TABLE IF NOT EXISTS user_prompts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_session_id TEXT NOT NULL,
+    prompt_number INTEGER NOT NULL,
+    prompt_text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_at_epoch INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS session_summaries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_session_id TEXT NOT NULL,
+    project TEXT NOT NULL,
+    request TEXT,
+    investigated TEXT,
+    learned TEXT,
+    completed TEXT,
+    next_steps TEXT,
+    files_read TEXT,
+    files_edited TEXT,
+    notes TEXT,
+    prompt_number INTEGER,
+    discovery_tokens INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    created_at_epoch INTEGER NOT NULL
+);
+SQL
+```
+
+Остальные таблицы (`historical_turns`, `ext_*`, FTS) создадут наши миграции в §7.
 
 ---
 
@@ -138,52 +193,50 @@ uv pip install --python ~/.claude-mem/semantic-env/bin/python \
     chromadb fastembed mcp pyyaml
 ```
 
-**Не ставь `sentence-transformers` напрямую** — он тянет torch + CUDA. ONNX-backend через `fastembed` достаточен.
+`sentence-transformers` не ставить — он тянет torch + CUDA. ONNX-backend через `fastembed` решает ту же задачу без гигабайт.
 
 ---
 
-## 5. Получить репо `claude-mem-ext`
-
-Клонировать или перекопировать рабочую копию:
+## 5. Получить репо
 
 ```bash
-git clone <url> ~/projects/claude-mem-ext
-cd ~/projects/claude-mem-ext
+git clone <url> ~/projects/anamnesis
+cd ~/projects/anamnesis
 ```
 
-Структура, которая должна быть:
+Проверка:
 
 ```
-mem_ext/    # config.py, db.py, cli.py, audit.py, verify.py,
+anamnesis/    # config.py, db.py, cli.py, audit.py, verify.py,
             # restore.py, backup.py, ingest/, indexers/, search/, eval/, daemon/
 migrations/ # 001_fts_and_unique.sql, 002_incremental_state.sql, 003_audit_log.sql
 systemd/    # *.service, *.timer
 ```
 
+Ниже все команды подразумевают `cd ~/projects/anamnesis && export PYTHONPATH=$PWD`.
+
 ---
 
-## 6. Перенести jsonl-историю (если у тебя есть)
+## 6. Перенести jsonl-историю (если уже есть)
 
-Если ты устанавливаешь на новой машине, но история Claude Code / Codex уже накоплена на старой — перенеси исходные jsonl:
+Если ставишь на новой машине, но старая история где-то лежит:
 
 ```bash
-# на старой машине:
-tar czf claude-history.tar.gz ~/.claude/projects/ ~/.codex/sessions/
+# на старой:
+tar czf history.tar.gz ~/.claude/projects/ ~/.codex/sessions/
 
-# на новой (положит в $HOME):
-tar xzf claude-history.tar.gz -C /
+# на новой (раскатает в $HOME):
+tar xzf history.tar.gz -C /
 ```
 
-Если ставишь с нуля — пропусти. Система будет захватывать всё, что появится начиная с этого момента.
+Если истории нет — пропусти.
 
 ---
 
 ## 7. Миграции
 
 ```bash
-cd ~/projects/claude-mem-ext
-export PYTHONPATH=$PWD
-~/.claude-mem/semantic-env/bin/python -m mem_ext.db
+~/.claude-mem/semantic-env/bin/python -m anamnesis.db
 ```
 
 Ожидаемый вывод:
@@ -199,23 +252,23 @@ Applied: 001_fts_and_unique.sql, 002_incremental_state.sql, 003_audit_log.sql
 
 ```bash
 sqlite3 ~/.claude-mem/claude-mem.db ".tables" | tr ' ' '\n' | grep -E "ext_|historical_"
-# должны быть ext_audit, ext_embed_state, ext_ingest_state, ext_migrations,
-# historical_turns, historical_turns_fts (+ _fts_* служебные)
+# должны быть: ext_audit, ext_embed_state, ext_ingest_state, ext_migrations,
+# historical_turns, historical_turns_fts (+ служебные _fts_*)
 ```
 
 ---
 
 ## 8. Первичный бэкфилл всей истории
 
-Одноразовая операция: читает jsonl из `~/.claude/projects/**` и `~/.codex/sessions/**`, наполняет `sdk_sessions`, `user_prompts`, `historical_turns`, `session_summaries`, затем эмбеддит в Chroma.
+Одноразовая операция: читает jsonl из всех сконфигурированных директорий, наполняет `sdk_sessions`, `user_prompts`, `historical_turns`, `session_summaries`, затем эмбеддит в Chroma.
 
 ```bash
-~/.claude-mem/semantic-env/bin/python -m mem_ext.cli sync
+~/.claude-mem/semantic-env/bin/python -m anamnesis.cli sync
 ```
 
-В конце печатает что-то вроде:
+В конце печатает:
 
-```
+```json
 {"ingest": {"total": N, "skipped": 0, "new_files": N, "new_turns": K, "errors": 0},
  "embed":  {"embedded": E, "elapsed": ...}}
 ```
@@ -223,173 +276,167 @@ sqlite3 ~/.claude-mem/claude-mem.db ".tables" | tr ' ' '\n' | grep -E "ext_|hist
 ### 8.1. Проверка целостности
 
 ```bash
-~/.claude-mem/semantic-env/bin/python -m mem_ext.cli verify
+~/.claude-mem/semantic-env/bin/python -m anamnesis.cli verify
 ```
 
-Ожидаемо: `"healthy": true`, `"issues": []`, `drift_state_vs_chroma = 0`.
+Должно быть `"healthy": true`, `"issues": []`, `drift_state_vs_chroma = 0`.
 
-Если `missing_embeddings > 0` — запусти `mem-ext sync` ещё раз, он дошлёт.
+Если `missing_embeddings > 0` — запусти `sync` ещё раз, дошлёт.
 
 ---
 
 ## 9. Проверить поиск
 
-Hybrid (BM25 + семантика через RRF):
-
 ```bash
-~/.claude-mem/semantic-env/bin/python -m mem_ext.cli search "любой запрос из твоего контекста" --top-k 10
+~/.claude-mem/semantic-env/bin/python -m anamnesis.cli search "любой запрос из твоего контекста" --top-k 10
 ```
 
-Должны появиться turns с session_id, timestamp, role, source (claude / claude-subagent / codex) и snippet.
+Результат — turns с `session_id`, `timestamp`, `role`, `source` (claude / claude-subagent / codex / …), snippet. Если возвращает пусто — в корпусе нет того, что ищешь (проверь `anamnesis status` — `turns > 0`).
 
 ### 9.1. Регрессионный набор (golden)
 
-В репо лежит шаблонный `mem_ext/eval/golden.yaml`. Он **рабочий только на исходном корпусе автора**. Для твоей истории его надо переписать:
+В репо `anamnesis/eval/golden.yaml` лежит шаблон. На чужой истории он **не работает** — его надо заменить на 15–30 запросов под **свои** темы.
 
-1. Собери 15–30 запросов, для которых ты знаешь, что ответ есть в твоей истории.
-2. Для каждого укажи keywords, которые должны встретиться в top-K matches.
-3. Формат:
+Формат:
 
 ```yaml
 queries:
-  - query: "текст твоего запроса"
-    any_keywords: ["точное_слово1", "точное_слово2"]
-    min_hits: 1   # хотя бы 1 из top-K должен содержать keyword
+  - query: "текст запроса"
+    any_keywords: ["слово1", "слово2"]   # хотя бы одно должно встретиться в хите
+    min_hits: 1                          # минимум N хитов в top-K
     top_k: 10
 ```
+
+Принцип: выбираешь темы, про которые точно знаешь, что они обсуждались. Формулируешь запросы так, как реально будешь искать (обобщённо, не точно-по-словам). В `any_keywords` — точные токены, которые должны оказаться в результатах.
 
 Прогон:
 
 ```bash
-~/.claude-mem/semantic-env/bin/python -m mem_ext.cli eval --mode hybrid
+~/.claude-mem/semantic-env/bin/python -m anamnesis.cli eval --mode hybrid
 ```
 
-Это тест на регрессию: после любого изменения (новая модель, другой tokenizer, правка chunk-логики) результат не должен упасть. Без своего golden-набора ты не узнаешь, стало лучше или хуже.
+Смысл не в 100%, а в **baseline**. После любого изменения (смена модели, правка tokenizer, эксперимент с весами RRF) прогоняешь снова и сравниваешь числа.
 
 ---
 
-## 10. Зарегистрировать MCP в Claude Code
+## 10. Зарегистрировать MCP-сервер в клиентах
+
+### 10.a — Claude Code
 
 ```bash
-claude mcp add mem-ext ~/.claude-mem/semantic-env/bin/python \
-    -e PYTHONPATH=$HOME/projects/claude-mem-ext \
-    -- -m mem_ext.daemon.mcp_server
+claude mcp add anamnesis ~/.claude-mem/semantic-env/bin/python \
+    -e PYTHONPATH=$HOME/projects/anamnesis \
+    -- -m anamnesis.daemon.mcp_server
 
-claude mcp list   # должно быть "mem-ext ... ✓ Connected"
+claude mcp list   # должно быть "anamnesis ... ✓ Connected"
 ```
 
-При следующем запуске Claude Code (CLI или IDE-extension) будут доступны:
-
-- `mem_search(query, top_k, role, mode)` — hybrid / semantic / bm25
-- `mem_get_turn(turn_id, context)` — turn + окрестность
-- `mem_get_session(session_id, max_turns)`
-- `mem_stats()`
-
----
-
-## 11. Зарегистрировать MCP в Codex
-
-Открыть `~/.codex/config.toml` и добавить (предварительно сделав бэкап):
+### 10.b — Codex CLI
 
 ```bash
 cp ~/.codex/config.toml ~/.codex/config.toml.bak
 
 cat >> ~/.codex/config.toml <<EOF
 
-[mcp_servers.mem-ext]
+[mcp_servers.anamnesis]
 command = "$HOME/.claude-mem/semantic-env/bin/python"
-args = ["-m", "mem_ext.daemon.mcp_server"]
-env = { PYTHONPATH = "$HOME/projects/claude-mem-ext" }
+args = ["-m", "anamnesis.daemon.mcp_server"]
+env = { PYTHONPATH = "$HOME/projects/anamnesis" }
 EOF
 ```
 
-(Подставь реальный `$HOME` вручную если shell не раскроет.)
+(Если shell не раскроет `$HOME` в heredoc — подставь путь вручную.)
 
 Проверить:
 
 ```bash
-codex mcp list              # mem-ext, enabled=true
-codex mcp get mem-ext       # детали
+codex mcp list              # anamnesis, enabled=true
+codex mcp get anamnesis       # детали
 ```
 
-Оба клиента используют **один и тот же** индекс — дублировать не надо.
+### 10.c — любой другой MCP-совместимый клиент
+
+Конфигурация аналогична: stdio-транспорт, команда `python -m anamnesis.daemon.mcp_server`, env `PYTHONPATH`. Инструменты, которые экспонируются: `mem_search`, `mem_get_turn`, `mem_get_session`, `mem_stats`.
+
+Все клиенты используют **один** SQLite и **одну** Chroma — дублировать данные не нужно.
 
 ---
 
-## 12. Systemd user-таймеры
+## 11. Systemd user-таймеры
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp ~/projects/claude-mem-ext/systemd/*.service \
-   ~/projects/claude-mem-ext/systemd/*.timer \
+cp ~/projects/anamnesis/systemd/*.service \
+   ~/projects/anamnesis/systemd/*.timer \
    ~/.config/systemd/user/
 
 systemctl --user daemon-reload
-systemctl --user enable --now mem-ext-sync.timer
-systemctl --user enable --now mem-ext-backup.timer
+systemctl --user enable --now anamnesis-sync.timer
+systemctl --user enable --now anamnesis-backup.timer
 
-systemctl --user list-timers | grep mem-ext
+systemctl --user list-timers | grep anamnesis
 ```
 
-- `mem-ext-sync.timer` — инкрементальный sync (mtime-based) + WAL checkpoint.
-- `mem-ext-backup.timer` — ежедневный WAL-safe snapshot DB + Chroma в `~/claude-mem-backups/` (ротация: последние 10).
+Юниты:
 
-### 12.1. Работа без активной сессии
+- `anamnesis-sync.timer` — инкрементальный sync + WAL checkpoint.
+- `anamnesis-backup.timer` — ежедневный WAL-safe snapshot DB + Chroma в `~/anamnesis-backups/` (ротация последних 10).
 
-Чтобы user-таймеры работали когда ты не залогинен:
+### 11.1. Работа без активной сессии
 
 ```bash
 sudo loginctl enable-linger $USER
 ```
 
-### 12.2. Проверка запуска
+### 11.2. Проверка запуска
 
 ```bash
-systemctl --user start mem-ext-sync.service
-journalctl --user -u mem-ext-sync.service -n 30
+systemctl --user start anamnesis-sync.service
+journalctl --user -u anamnesis-sync.service -n 30
 ```
 
 ---
 
-## 13. Ежедневные команды
+## 12. Ежедневные команды
 
-Удобный alias:
+Алиас:
 
 ```bash
-alias memext='PYTHONPATH=$HOME/projects/claude-mem-ext $HOME/.claude-mem/semantic-env/bin/python -m mem_ext.cli'
+alias anamnesis='PYTHONPATH=$HOME/projects/anamnesis $HOME/.claude-mem/semantic-env/bin/python -m anamnesis.cli'
 ```
 
 ```bash
-memext status        # сессии / turns / embedded / drift / last_ingest
-memext verify        # integrity SQLite + FTS + drift + orphans
-memext search "query" --top-k 10
-memext sync          # вручную (обычно не надо — таймер делает)
-memext backup        # вручную (обычно не надо)
-memext audit --limit 20   # недавние операции (sync/backup/verify/restore)
-memext eval --mode hybrid # регрессионный тест по своему golden.yaml
-memext restore ~/claude-mem-backups/claude-mem-<stamp>.tar.gz
+anamnesis status            # сессии / turns / embedded / drift / last_ingest
+anamnesis verify            # integrity SQLite + FTS + drift + orphans
+anamnesis search "query" --top-k 10
+anamnesis sync              # вручную (обычно делает timer)
+anamnesis backup            # вручную (обычно делает timer)
+anamnesis audit --limit 20  # последние операции с timestamps
+anamnesis eval --mode hybrid
+anamnesis restore ~/anamnesis-backups/<tarball>.tar.gz
 ```
 
 ---
 
-## 14. Где что лежит
+## 13. Где что лежит
 
 ```
-~/.claude-mem/
-├─ claude-mem.db                  # SQLite: все таблицы
-├─ semantic-chroma/               # Chroma коллекция 'history_turns'
+~/.claude-mem/                     # данные (путь историческиий; переопределяется
+                                   # через ANAMNESIS_DATA_DIR)
+├─ claude-mem.db                   # SQLite: все таблицы
+├─ semantic-chroma/                # Chroma коллекция 'history_turns'
 ├─ fastembed-models/               # ONNX модель (cached)
 ├─ semantic-env/                   # Python venv
 ├─ health.json                     # snapshot последнего sync
-├─ settings.json                   # claude-mem конфиг
-├─ supervisor.json, worker.pid     # worker state
-└─ logs/                           # worker logs
+├─ settings.json                   # конфиг claude-mem (если плагин стоит)
+├─ supervisor.json, worker.pid     # worker state (claude-mem)
+└─ logs/                           # worker logs (claude-mem)
 
-~/claude-mem-backups/              # tarball'ы (last N)
+~/anamnesis-backups/              # tarball'ы (last N)
 
-~/projects/claude-mem-ext/         # код (git)
-├─ mem_ext/
-│  ├─ config.py                    # пути, модель, коллекция (env-overridable)
+~/projects/anamnesis/                # код (git)
+├─ anamnesis/
+│  ├─ config.py                    # пути / модель / коллекция (env-overridable)
 │  ├─ db.py                        # connect() + миграции
 │  ├─ cli.py                       # sync/status/search/backup/verify/restore/audit/eval
 │  ├─ audit.py                     # audited() + write_health()
@@ -402,38 +449,66 @@ memext restore ~/claude-mem-backups/claude-mem-<stamp>.tar.gz
 │  ├─ eval/{golden.yaml, run.py}
 │  └─ daemon/mcp_server.py         # stdio MCP
 ├─ migrations/
-├─ systemd/
-├─ SETUP.md, RECOVERY.md, README.md
+└─ systemd/
 ```
+
+---
+
+## 14. Добавить новый источник jsonl
+
+Сценарий: кроме Claude Code и Codex появился третий клиент (Aider, Cursor agent, свой собственный). Интеграция:
+
+1. Написать парсер в `anamnesis/ingest/parsers_<name>.py`, возвращающий dict:
+
+   ```python
+   {"csid": "...", "cwd": "...", "title": ..., "first_ts": "...", "last_ts": "...",
+    "turns": [(role, text, ts), ...], "files": [...], "platform": "<name>"}
+   ```
+
+2. Зарегистрировать источник в `anamnesis/ingest/incremental.py::_discover()`:
+
+   ```python
+   for p in glob(os.path.join(MY_ROOT, "pattern.jsonl")):
+       yield "<name>", p, os.stat(p).st_mtime_ns
+   ```
+
+3. Добавить ветку в `process()` → вызывающую твой парсер.
+4. `anamnesis sync` начнёт подхватывать новые файлы. `platform_source='<name>'` появится в `anamnesis status` / `mem_stats()`.
+
+Голден-набор можно расширить запросами, специфичными для этого клиента.
 
 ---
 
 ## 15. Переезд на другую машину
 
+На старой (или из последнего бэкапа) нужно:
+
+- `~/anamnesis-backups/<latest>.tar.gz` — данные,
+- `~/projects/anamnesis/` — репо,
+- (опционально) `~/.codex/sessions/`, `~/.claude/projects/` — если хочешь иметь raw jsonl-ы.
+
+На новой — §§1–5, затем:
+
 ```bash
-# На старой (или из последнего бэкапа):
-#   ~/claude-mem-backups/claude-mem-LATEST.tar.gz
-#   ~/projects/claude-mem-ext/   — репо
-#   ~/.codex/sessions/, ~/.claude/projects/   — если хочешь иметь raw jsonl
+cd ~/projects/anamnesis
+PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m anamnesis.cli restore \
+    ~/anamnesis-backups/<latest>.tar.gz
 
-# На новой — §1–5, затем:
-cd ~/projects/claude-mem-ext
-PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m mem_ext.cli restore \
-    ~/claude-mem-backups/claude-mem-LATEST.tar.gz
-
-PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m mem_ext.db   # миграции (no-op)
-PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m mem_ext.cli verify
+PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m anamnesis.db     # миграции (no-op)
+PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m anamnesis.cli verify
 ```
 
-Подробнее — в [RECOVERY.md](RECOVERY.md).
+Далее §§10–11: регистрация MCP в клиентах + systemd-таймеры.
+
+**Как устроен restore.** Tarball содержит `claude-mem.db` и `semantic-chroma/` на верхнем уровне. Команда распаковывает во временную директорию, атомарно подменяет текущие файлы, а старые сохраняет рядом как `claude-mem.db.pre-restore-<stamp>` и `semantic-chroma.pre-restore-<stamp>/`. Если что-то пошло не так — эти файлы остаются, можно откатиться.
 
 ---
 
 ## 16. Известные грабли
 
-### 16.1. Claude Code main-сессии могут не попасть в `historical_turns`
+### 16.1. Пропущенные main-сессии
 
-Если `claude-mem` был установлен **до** добавления `claude-mem-ext` и уже писал в БД, в `sdk_sessions` могут быть строки с `platform_source='claude'` без соответствующих `historical_turns`. Idempotency `sync`'а пропустит их.
+Если базовая SQLite уже существовала (например, из старого `claude-mem`) и в `sdk_sessions` есть строки без соответствующих записей в `historical_turns` — идемпотентность `sync` по content_session_id пропустит их.
 
 Диагностика:
 
@@ -442,107 +517,125 @@ sqlite3 ~/.claude-mem/claude-mem.db "
 SELECT platform_source, COUNT(*) FROM historical_turns GROUP BY platform_source;"
 ```
 
-Если `claude` отсутствует или сильно меньше ожидаемого — запусти:
+Если для какого-то источника 0 или сильно меньше ожидаемого:
 
 ```bash
-cd ~/projects/claude-mem-ext
-PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m mem_ext.ingest.recover_main
+cd ~/projects/anamnesis
+PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m anamnesis.ingest.recover_main
 ```
 
-Дальше — `mem-ext sync`, чтобы Chroma догнала.
+Перечитает jsonl и дозальёт. Далее — `anamnesis sync`, чтобы Chroma догнала.
 
-### 16.2. Формат Codex jsonl
+### 16.2. Смена формата у клиента
 
-`~/.codex/sessions/**/*.jsonl` отличается от Claude Code: `type: session_meta | turn_context | response_item | event_msg`, content хранится как Python-repr (`"[{'type': 'input_text', ...}]"`), парсим через `ast.literal_eval`. При смене формата OpenAI — парсер `parse_codex_jsonl` может требовать правки.
+Если один из клиентов меняет формат jsonl — парсер в `anamnesis/ingest/` требует обновления. Симптом: после апгрейда клиента `new_files` в sync'е не растёт или стабильно `errors > 0`.
 
 ### 16.3. `paraphrase-multilingual-MiniLM-L12-v2` — mean pooling warning
 
-fastembed ≥ 0.6 переключился с CLS на mean pooling. Качество близко к прежнему, но для точного воспроизведения предыдущего поведения можно зафиксировать `fastembed==0.5.1`.
+`fastembed ≥ 0.6` переключился с CLS на mean pooling. Качество близко. Для точного воспроизведения старого поведения — `fastembed==0.5.1`.
 
-### 16.4. Своя Chroma у `claude-mem` на :8000
+### 16.4. Своя Chroma у `claude-mem` на `:8000`
 
-`claude-mem` объявляет собственный Chroma на `127.0.0.1:8000`, но поднимает его лениво. **Наш** семантический индекс живёт отдельно в `~/.claude-mem/semantic-chroma/` через `chromadb.PersistentClient` и не зависит от их сервера.
+`claude-mem` объявляет собственный Chroma, но поднимает его лениво. Наш индекс живёт отдельно в `~/.claude-mem/semantic-chroma/` через `chromadb.PersistentClient`. Их Chroma не используется и не мешает.
 
-### 16.5. Codex + Claude Code одновременно
+### 16.5. Несколько клиентов одновременно
 
-Оба клиента работают с одной `claude-mem.db` и одним `semantic-chroma/`. SQLite в WAL-режиме выдерживает конкурентные чтения. Параллельные writes в `sync` защищены `Type=oneshot` systemd-юнита. MCP-запросы (`mem_search`) — read-only.
+Все клиенты работают с одной БД и одной Chroma. SQLite в WAL-режиме выдерживает конкурентные чтения. Параллельные writes в `sync` защищены systemd-юнитом `Type=oneshot`. MCP-запросы — read-only.
 
-### 16.6. Первый запрос через MCP медленнее
+### 16.6. Первый поиск через MCP медленнее
 
 При старте процесса модель (~220 МБ) загружается в RAM. Последующие запросы — быстрые. Кэш модели — в `~/.claude-mem/fastembed-models/`.
+
+### 16.7. SQLite повреждён (`verify` показывает `sqlite_integrity != ok`)
+
+Если бэкап свежий — `anamnesis restore`. Если нет:
+
+```bash
+sqlite3 ~/.claude-mem/claude-mem.db ".recover" > /tmp/recovered.sql
+sqlite3 /tmp/recovered.db < /tmp/recovered.sql
+# перенести /tmp/recovered.db в ~/.claude-mem/claude-mem.db вручную после проверки
+```
+
+Потерянные сессии (между последним бэкапом и сбоем) вернутся автоматически при следующем `sync` — jsonl-файлы живут независимо от БД.
+
+### 16.8. FTS5 деградировал
+
+FTS перестраивается без потери данных:
+
+```bash
+sqlite3 ~/.claude-mem/claude-mem.db \
+    "INSERT INTO historical_turns_fts(historical_turns_fts) VALUES('rebuild');"
+anamnesis verify
+```
+
+### 16.9. Chroma «сломалась»
+
+Chroma — кэш эмбеддингов, сносится и пересчитывается без потери данных:
+
+```bash
+rm -rf ~/.claude-mem/semantic-chroma
+sqlite3 ~/.claude-mem/claude-mem.db "DELETE FROM ext_embed_state;"
+anamnesis sync
+```
 
 ---
 
 ## 17. Кастомизация через env vars
 
 | Variable | Default | Что делает |
-|---|---|---|
-| `MEM_EXT_DATA_DIR` | `~/.claude-mem` | корень данных |
-| `MEM_EXT_CC_ROOT` | `~/.claude/projects` | источник Claude Code jsonl |
-| `MEM_EXT_CODEX_ROOT` | `~/.codex/sessions` | источник Codex jsonl |
-| `MEM_EXT_BACKUP_ROOT` | `~/claude-mem-backups` | куда бэкапить |
-| `MEM_EXT_BACKUP_KEEP_LAST` | `10` | ротация |
-| `MEM_EXT_EMBED_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | ONNX-модель fastembed |
-| `MEM_EXT_CHROMA_COLLECTION` | `history_turns` | имя коллекции |
+| --- | --- | --- |
+| `ANAMNESIS_DATA_DIR` | `~/.claude-mem` | корень данных (БД + Chroma + venv + модель) |
+| `ANAMNESIS_CC_ROOT` | `~/.claude/projects` | источник Claude Code jsonl |
+| `ANAMNESIS_CODEX_ROOT` | `~/.codex/sessions` | источник Codex jsonl |
+| `ANAMNESIS_BACKUP_ROOT` | `~/anamnesis-backups` | куда бэкапить |
+| `ANAMNESIS_BACKUP_KEEP_LAST` | `10` | ротация |
+| `ANAMNESIS_EMBED_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | ONNX fastembed |
+| `ANAMNESIS_CHROMA_COLLECTION` | `history_turns` | имя коллекции |
 
 ---
 
-## 18. Проверочный чек-лист
+## 18. Проверочный чек-лист после установки
 
 ```bash
-# 1. Worker жив
-curl -sS http://localhost:37777/ | head -1
-
-# 2. CLI работает
-memext status
-memext verify
-
-# 3. MCP в обоих клиентах
-claude mcp list | grep mem-ext
-codex mcp list  | grep mem-ext
-
-# 4. Таймеры активны
-systemctl --user list-timers | grep mem-ext
-
-# 5. Поиск возвращает результаты
-memext search "тест" --top-k 3
-
-# 6. После первого ежедневного цикла — бэкап появился
-ls -lh ~/claude-mem-backups/
+anamnesis status                                  # корпус заполнен
+anamnesis verify                                  # healthy=true
+claude mcp list 2>/dev/null | grep anamnesis     # Claude Code видит (если поставлен)
+codex  mcp list 2>/dev/null | grep anamnesis     # Codex видит (если поставлен)
+systemctl --user list-timers | grep anamnesis    # таймеры активны
+anamnesis search "любой_твой_запрос" --top-k 3    # поиск возвращает результаты
+ls -lh ~/anamnesis-backups/                   # после первого дня — tarball
 ```
-
-Все шесть ✅ — система работает автономно.
 
 ---
 
 ## 19. Удаление
 
 ```bash
-systemctl --user disable --now mem-ext-sync.timer mem-ext-backup.timer
-rm ~/.config/systemd/user/mem-ext-*.{service,timer}
+systemctl --user disable --now anamnesis-sync.timer anamnesis-backup.timer
+rm ~/.config/systemd/user/anamnesis-*.{service,timer}
 systemctl --user daemon-reload
 
-claude mcp remove mem-ext
-codex mcp remove mem-ext
-
-# Данные — в ~/.claude-mem/ и ~/claude-mem-backups/, удаляй вручную при необходимости.
+claude mcp remove anamnesis 2>/dev/null
+codex mcp remove anamnesis 2>/dev/null
 ```
 
-claude-mem плагин:
+`claude-mem` плагин (если ставил):
 
 ```bash
 claude plugin remove claude-mem@thedotmack
 # или снять флаги в ~/.claude/settings.json
 ```
 
+Данные остаются в `~/.claude-mem/` и `~/anamnesis-backups/` — удаляй вручную.
+
 ---
 
 ## 20. Что НЕ входит (осознанно отложено)
 
-- **Privacy layer** — маскировка токенов/секретов при индексации. Risky: они сейчас попадают в tarball-бэкапы и в Chroma.
-- **Event extraction (decisions/todos/facts)** через локальный LLM. Превращает архив в базу знаний, но требует Ollama + дообучения схем.
-- **Апгрейд на `multilingual-e5-large`** (1024-dim). Жирнее, но качество выше; окупается только если MiniLM промахивается на твоём домене.
-- **Off-site backup** — сейчас только локальный диск. Для production добавить `rclone` / `git-crypt` / zfs send.
-- **Reranker (cross-encoder)**. Добавляет 2–3 сек/запрос, но даёт заметный precision на «близких, но не тех» результатах.
+- **Privacy layer** — маскировка токенов/секретов при индексации. Риск: секреты попадают в tarball-бэкапы и в Chroma. Включать когда корпус содержит чувствительные данные или бэкап уходит за пределы машины.
+- **Event extraction** (decisions / todos / facts через локальный LLM) — превращает архив в базу знаний, не в базу реплик. Отдельный кусок работы с Ollama + структурированными промптами.
+- **Апгрейд на `multilingual-e5-large`** (1024-dim) — жирнее, качество выше. Только если MiniLM систематически промахивается на твоём домене (golden eval покажет).
+- **Off-site backup** — сейчас только локальный диск. Для серьёзной надёжности — `rclone` / `git-crypt` / `zfs send` на внешнее хранилище.
+- **Reranker (cross-encoder)** — добавляет 2–3 сек/запрос, но поднимает precision на «близких, но не тех» результатах. Включать если hybrid даёт релевантное, но вторым-третьим, а не первым.
 
-Каждый пункт — отдельный кусок работы с измеримым критерием, когда его стоит включить.
+Каждый пункт — отдельная итерация с измеримым критерием.

@@ -6,29 +6,29 @@ import os
 from pathlib import Path
 
 # --- Data roots ---
-DATA_DIR = Path(os.path.expanduser(os.environ.get("MEM_EXT_DATA_DIR", "~/.claude-mem")))
+DATA_DIR = Path(os.path.expanduser(os.environ.get("ANAMNESIS_DATA_DIR", "~/.claude-mem")))
 DB_PATH = str(DATA_DIR / "claude-mem.db")
 CHROMA_DIR = str(DATA_DIR / "semantic-chroma")
 FASTEMBED_CACHE = str(DATA_DIR / "fastembed-models")
 HEALTH_FILE = str(DATA_DIR / "health.json")
 
 # --- Source roots ---
-CC_ROOT = os.path.expanduser(os.environ.get("MEM_EXT_CC_ROOT", "~/.claude/projects"))
-CODEX_ROOT = os.path.expanduser(os.environ.get("MEM_EXT_CODEX_ROOT", "~/.codex/sessions"))
+CC_ROOT = os.path.expanduser(os.environ.get("ANAMNESIS_CC_ROOT", "~/.claude/projects"))
+CODEX_ROOT = os.path.expanduser(os.environ.get("ANAMNESIS_CODEX_ROOT", "~/.codex/sessions"))
 
 # --- Backups ---
-BACKUP_ROOT = os.path.expanduser(os.environ.get("MEM_EXT_BACKUP_ROOT", "~/claude-mem-backups"))
-BACKUP_KEEP_LAST = int(os.environ.get("MEM_EXT_BACKUP_KEEP_LAST", "10"))
+BACKUP_ROOT = os.path.expanduser(os.environ.get("ANAMNESIS_BACKUP_ROOT", "~/anamnesis-backups"))
+BACKUP_KEEP_LAST = int(os.environ.get("ANAMNESIS_BACKUP_KEEP_LAST", "10"))
 
 # --- Embedding model ---
 # Version token is baked into the collection name so multiple models can coexist.
 EMBED_MODEL = os.environ.get(
-    "MEM_EXT_EMBED_MODEL",
+    "ANAMNESIS_EMBED_MODEL",
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
 )
 EMBED_DIM = 384
-MODEL_TAG = os.environ.get("MEM_EXT_MODEL_TAG", "mml12")
-CHROMA_COLLECTION = os.environ.get("MEM_EXT_CHROMA_COLLECTION", "history_turns")
+MODEL_TAG = os.environ.get("ANAMNESIS_MODEL_TAG", "mml12")
+CHROMA_COLLECTION = os.environ.get("ANAMNESIS_CHROMA_COLLECTION", "history_turns")
 
 # --- RRF / search defaults ---
 RRF_K = 60

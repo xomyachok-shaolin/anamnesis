@@ -1,7 +1,7 @@
 -- Migration 003: audit log of operational actions.
 -- Records sync/backup/restore/verify invocations for later forensics.
 
-CREATE TABLE IF NOT EXISTS ext_audit (
+CREATE TABLE IF NOT EXISTS anamnesis_audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     at TEXT NOT NULL DEFAULT (datetime('now')),
     action TEXT NOT NULL,
@@ -10,5 +10,5 @@ CREATE TABLE IF NOT EXISTS ext_audit (
     details TEXT  -- JSON payload with per-action fields
 );
 
-CREATE INDEX IF NOT EXISTS idx_ext_audit_at ON ext_audit(at DESC);
-CREATE INDEX IF NOT EXISTS idx_ext_audit_action ON ext_audit(action, at DESC);
+CREATE INDEX IF NOT EXISTS idx_ext_audit_at ON anamnesis_audit(at DESC);
+CREATE INDEX IF NOT EXISTS idx_ext_audit_action ON anamnesis_audit(action, at DESC);

@@ -1,10 +1,10 @@
-"""Unified CLI: mem-ext <subcommand>"""
+"""Unified CLI: anamnesis <subcommand>"""
 import argparse
 import json
 import sys
 
-from mem_ext.audit import audited, write_health, recent
-from mem_ext.db import connect
+from anamnesis.audit import audited, write_health, recent
+from anamnesis.db import connect
 
 
 def _wal_checkpoint():
@@ -25,17 +25,17 @@ def _compute_status() -> dict:
         "user_prompts": cur.execute("SELECT COUNT(*) FROM user_prompts").fetchone()[0],
     }
     embedded = cur.execute(
-        "SELECT COUNT(*) FROM ext_embed_state WHERE collection='history_turns'"
+        "SELECT COUNT(*) FROM anamnesis_embed_state WHERE collection='history_turns'"
     ).fetchone()[0]
     unembedded = cur.execute(
         """
         SELECT COUNT(*) FROM historical_turns ht
-        LEFT JOIN ext_embed_state es ON es.turn_id = ht.id AND es.collection='history_turns'
+        LEFT JOIN anamnesis_embed_state es ON es.turn_id = ht.id AND es.collection='history_turns'
         WHERE es.turn_id IS NULL
         """
     ).fetchone()[0]
-    last_ingest = cur.execute("SELECT MAX(ingested_at) FROM ext_ingest_state").fetchone()[0]
-    files_tracked = cur.execute("SELECT COUNT(*) FROM ext_ingest_state").fetchone()[0]
+    last_ingest = cur.execute("SELECT MAX(ingested_at) FROM anamnesis_ingest_state").fetchone()[0]
+    files_tracked = cur.execute("SELECT COUNT(*) FROM anamnesis_ingest_state").fetchone()[0]
     recent_audit = recent(5)
     conn.close()
 
@@ -53,9 +53,9 @@ def _compute_status() -> dict:
 
 
 def cmd_sync(args):
-    from mem_ext.db import run_migrations
-    from mem_ext.ingest.incremental import run as ingest
-    from mem_ext.indexers.incremental_chroma import run as embed
+    from anamnesis.db import run_migrations
+    from anamnesis.ingest.incremental import run as ingest
+    from anamnesis.indexers.incremental_chroma import run as embed
 
     applied = run_migrations()
     if applied:
@@ -83,7 +83,7 @@ def cmd_status(args):
 
 
 def cmd_search(args):
-    from mem_ext.search.hybrid import search, format_hit
+    from anamnesis.search.hybrid import search, format_hit
     conn = connect()
     rl = args.role if args.role in ("user", "assistant") else None
     hits = search(conn, args.query, top_k=args.top_k, pool=args.pool, role=rl)
@@ -93,7 +93,7 @@ def cmd_search(args):
 
 
 def cmd_backup(args):
-    from mem_ext.backup import run
+    from anamnesis.backup import run
     with audited("backup") as details:
         info = run()
         details.update(info)
@@ -101,7 +101,7 @@ def cmd_backup(args):
 
 
 def cmd_restore(args):
-    from mem_ext.restore import run
+    from anamnesis.restore import run
     with audited("restore") as details:
         info = run(args.tarball, force=args.force)
         details.update(info)
@@ -109,7 +109,7 @@ def cmd_restore(args):
 
 
 def cmd_verify(args):
-    from mem_ext.verify import run
+    from anamnesis.verify import run
     with audited("verify") as details:
         report = run()
         details.update({
@@ -131,7 +131,7 @@ def cmd_audit(args):
 
 
 def cmd_eval(args):
-    from mem_ext.eval.run import evaluate, load_golden
+    from anamnesis.eval.run import evaluate, load_golden
     from pathlib import Path
     golden = args.golden or str(Path(__file__).parent / "eval" / "golden.yaml")
     queries = load_golden(golden)
@@ -142,7 +142,7 @@ def cmd_eval(args):
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog="mem-ext")
+    ap = argparse.ArgumentParser(prog="anamnesis")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("sync", help="incremental ingest + embed + WAL checkpoint")

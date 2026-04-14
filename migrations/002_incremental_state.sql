@@ -1,6 +1,6 @@
 -- Migration 002: support safe incremental ingest.
 -- - UNIQUE indexes on derived tables so ON CONFLICT DO NOTHING works.
--- - ext_ingest_state: track last processed file mtime per source
+-- - anamnesis_ingest_state: track last processed file mtime per source
 --   to skip unchanged jsonls on repeated runs.
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_user_prompts_session_prompt
@@ -9,7 +9,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_user_prompts_session_prompt
 CREATE UNIQUE INDEX IF NOT EXISTS ux_session_summaries_session_prompt
     ON session_summaries(memory_session_id, prompt_number);
 
-CREATE TABLE IF NOT EXISTS ext_ingest_state (
+CREATE TABLE IF NOT EXISTS anamnesis_ingest_state (
     source TEXT NOT NULL,
     path TEXT NOT NULL,
     mtime_ns INTEGER NOT NULL,
@@ -19,10 +19,10 @@ CREATE TABLE IF NOT EXISTS ext_ingest_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ext_ingest_state_mtime
-    ON ext_ingest_state(mtime_ns);
+    ON anamnesis_ingest_state(mtime_ns);
 
 -- Track which historical_turns have been embedded into Chroma.
-CREATE TABLE IF NOT EXISTS ext_embed_state (
+CREATE TABLE IF NOT EXISTS anamnesis_embed_state (
     turn_id INTEGER PRIMARY KEY,
     collection TEXT NOT NULL,
     embedded_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -30,4 +30,4 @@ CREATE TABLE IF NOT EXISTS ext_embed_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ext_embed_state_coll
-    ON ext_embed_state(collection);
+    ON anamnesis_embed_state(collection);
