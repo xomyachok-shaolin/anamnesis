@@ -24,6 +24,7 @@ Claude Code config (add to ~/.claude.json or via `claude mcp add`):
 """
 from __future__ import annotations
 
+import sqlite3
 import sys
 from typing import Any
 
@@ -59,6 +60,29 @@ def _init():
 mcp = FastMCP("anamnesis")
 
 
+def _search_error_response(
+    query: str,
+    mode: str,
+    error: str,
+    hint: str,
+) -> dict[str, Any]:
+    return {
+        "query": query,
+        "mode": mode,
+        "total": 0,
+        "hits": [],
+        "error": error,
+        "hint": hint,
+    }
+
+
+def _fts_syntax_hint() -> str:
+    return (
+        "FTS query syntax was not accepted. Try a plain-language query, "
+        "drop boolean operators, or run separate searches."
+    )
+
+
 @mcp.tool()
 def mem_search(
     query: str,
@@ -77,19 +101,48 @@ def mem_search(
     Returns:
         {hits: [{rank, rrf_score, text, snippet, session, turn, role, timestamp, source, title, project, turn_id}]}
     """
-    _init()
     top_k = max(1, min(top_k, 50))
     rl = role if role in ("user", "assistant") else None
-    conn = connect()
+    conn = None
+    try:
+        conn = connect()
 
-    if mode == "hybrid":
-        hits = hybrid_search(conn, query, top_k=top_k, pool=50, role=rl)
-    elif mode == "semantic":
-        hits = _semantic(_EMB, _COL, query, top_k, role=rl)
-    elif mode == "bm25":
-        hits = _bm25(conn, query, top_k)
-    else:
-        raise ValueError(f"unknown mode: {mode}")
+        if mode == "hybrid":
+            _init()
+            hits = hybrid_search(conn, query, top_k=top_k, pool=50, role=rl)
+        elif mode == "semantic":
+            _init()
+            hits = _semantic(_EMB, _COL, query, top_k, role=rl)
+        elif mode == "bm25":
+            hits = _bm25(conn, query, top_k)
+        else:
+            return _search_error_response(
+                query=query,
+                mode=mode,
+                error=f"unknown mode: {mode}",
+                hint="Use one of: hybrid, semantic, bm25.",
+            )
+    except sqlite3.Error as exc:
+        msg = str(exc)
+        hint = _fts_syntax_hint() if "fts5" in msg.lower() and "syntax error" in msg.lower() else (
+            "Search backend returned a SQLite error. Try a simpler query or retry later."
+        )
+        return _search_error_response(
+            query=query,
+            mode=mode,
+            error=msg,
+            hint=hint,
+        )
+    except Exception as exc:
+        return _search_error_response(
+            query=query,
+            mode=mode,
+            error=f"{type(exc).__name__}: {exc}",
+            hint="Search failed inside the MCP server. Retry with a simpler query or restart the server.",
+        )
+    finally:
+        if conn is not None:
+            conn.close()
 
     out = []
     for rank, h in enumerate(hits, 1):
@@ -108,7 +161,6 @@ def mem_search(
             "project": h.meta.get("project", ""),
             "snippet": (h.text or "")[:400],
         })
-    conn.close()
     return {"query": query, "mode": mode, "total": len(out), "hits": out}
 
 
