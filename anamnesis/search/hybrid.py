@@ -5,6 +5,7 @@ where K is a constant (60 per Cormack et al. 2009), r iterates over rankers.
 """
 import os
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -16,9 +17,46 @@ RRF_K = 60
 
 # FTS5 unicode61 splits on non-alphanumeric; quoting a term with "." etc makes it a phrase.
 _token_re = re.compile(r"[\w]+", re.UNICODE)
+_phrase_re = re.compile(r"""["']?[\w./:-]{3,}["']?""", re.UNICODE)
+_fts_reserved = {"AND", "OR", "NOT", "NEAR"}
 
 
-def _fts_query(q: str) -> str:
+def _unique(items: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _fts_tokens(q: str) -> list[str]:
+    return _unique(
+        t
+        for t in _token_re.findall(q)
+        if len(t) >= 2 and t.upper() not in _fts_reserved
+    )
+
+
+def _quote_phrase(term: str) -> str:
+    return '"' + term.replace('"', '""') + '"'
+
+
+def _fts_phrases(q: str) -> list[str]:
+    phrases = []
+    for raw in _phrase_re.findall(q):
+        term = raw.strip("\"'")
+        if len(term) < 3 or term.upper() in _fts_reserved:
+            continue
+        if not any(ch in term for ch in "./:-"):
+            continue
+        phrases.append(term)
+    return _unique(phrases)
+
+
+def _fts_query(q: str) -> str | None:
     """Turn a free-form query into an FTS5 MATCH expression.
 
     Strategy: tokenize into words; keep words with length ≥ 2; OR them together;
@@ -26,16 +64,16 @@ def _fts_query(q: str) -> str:
     of an exact token (dots, dashes, colons, slashes) — so file paths,
     identifiers, IPs and CVE IDs stay searchable as phrases.
     """
-    tokens = [t for t in _token_re.findall(q) if len(t) >= 2]
+    tokens = _fts_tokens(q)
     parts = []
     if tokens:
         # OR-combine single tokens
         parts.append(" OR ".join(tokens))
     # phrase form for strings containing punctuation
-    phrases = re.findall(r'["\w]+(?:[.\-/:][\w]+)+', q)
-    for ph in phrases:
-        parts.append(f'"{ph}"')
-    return " OR ".join(parts) if parts else q
+    for ph in _fts_phrases(q):
+        parts.append(_quote_phrase(ph))
+    parts = _unique(parts)
+    return " OR ".join(parts) if parts else None
 
 
 def _embedder():
@@ -58,42 +96,48 @@ class Hit:
     rrf_score: float = 0.0
 
 
+def _run_bm25_query(conn, fts_expr: str, k: int):
+    return conn.execute(
+        """
+        SELECT ht.id, ht.text, ht.content_session_id, ht.turn_number,
+               ht.role, ht.timestamp, ht.platform_source,
+               s.custom_title, s.project,
+               bm25(historical_turns_fts) AS score
+        FROM historical_turns_fts
+        JOIN historical_turns ht ON ht.id = historical_turns_fts.rowid
+        LEFT JOIN sdk_sessions s ON s.content_session_id = ht.content_session_id
+        WHERE historical_turns_fts MATCH ?
+        ORDER BY score ASC
+        LIMIT ?
+        """,
+        (fts_expr, k),
+    ).fetchall()
+
+
+def _is_fts_syntax_error(exc: sqlite3.Error) -> bool:
+    msg = str(exc).lower()
+    return "fts5" in msg and "syntax error" in msg
+
+
 def _bm25(conn, q: str, k: int) -> list[Hit]:
     fts_expr = _fts_query(q)
+    if not fts_expr:
+        return []
     try:
-        rows = conn.execute(
-            """
-            SELECT ht.id, ht.text, ht.content_session_id, ht.turn_number,
-                   ht.role, ht.timestamp, ht.platform_source,
-                   s.custom_title, s.project,
-                   bm25(historical_turns_fts) AS score
-            FROM historical_turns_fts
-            JOIN historical_turns ht ON ht.id = historical_turns_fts.rowid
-            LEFT JOIN sdk_sessions s ON s.content_session_id = ht.content_session_id
-            WHERE historical_turns_fts MATCH ?
-            ORDER BY score ASC
-            LIMIT ?
-            """,
-            (fts_expr, k),
-        ).fetchall()
-    except Exception as e:
-        # FTS syntax errors: fall back to raw-tokens only
-        safe = " OR ".join(t for t in _token_re.findall(q) if len(t) >= 2) or "''"
-        rows = conn.execute(
-            """
-            SELECT ht.id, ht.text, ht.content_session_id, ht.turn_number,
-                   ht.role, ht.timestamp, ht.platform_source,
-                   s.custom_title, s.project,
-                   bm25(historical_turns_fts) AS score
-            FROM historical_turns_fts
-            JOIN historical_turns ht ON ht.id = historical_turns_fts.rowid
-            LEFT JOIN sdk_sessions s ON s.content_session_id = ht.content_session_id
-            WHERE historical_turns_fts MATCH ?
-            ORDER BY score ASC
-            LIMIT ?
-            """,
-            (safe, k),
-        ).fetchall()
+        rows = _run_bm25_query(conn, fts_expr, k)
+    except sqlite3.OperationalError as exc:
+        if not _is_fts_syntax_error(exc):
+            raise
+        # FTS syntax errors: fall back to sanitized raw tokens only.
+        safe = " OR ".join(_fts_tokens(q))
+        if not safe or safe == fts_expr:
+            return []
+        try:
+            rows = _run_bm25_query(conn, safe, k)
+        except sqlite3.OperationalError as fallback_exc:
+            if _is_fts_syntax_error(fallback_exc):
+                return []
+            raise
 
     hits = []
     for rank, row in enumerate(rows, 1):
