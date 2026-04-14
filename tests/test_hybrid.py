@@ -3,6 +3,10 @@ import unittest
 
 from anamnesis.search.hybrid import _bm25, _fts_query
 
+DEMO_PROJECT = "/workspace/projects/Тестовый проект (демо)"
+DEMO_TITLE = "Тестовый проект"
+DEMO_QUERY = f'"{DEMO_TITLE}" OR "{DEMO_PROJECT}"'
+
 
 class HybridSearchTests(unittest.TestCase):
     def setUp(self):
@@ -40,15 +44,11 @@ class HybridSearchTests(unittest.TestCase):
             """,
             (
                 "sess-1",
-                "Coursework automation",
-                "$HOME/projects/Тестовый проект (Тестовый проект)",
+                "Demo automation",
+                DEMO_PROJECT,
             ),
         )
-        text = (
-            'Проект "Тестовый проект" лежит в '
-            '"$HOME/projects/Тестовый проект '
-            '(Тестовый проект)".'
-        )
+        text = f'Проект "{DEMO_TITLE}" лежит в "{DEMO_PROJECT}".'
         self.conn.execute(
             """
             INSERT INTO historical_turns
@@ -66,24 +66,14 @@ class HybridSearchTests(unittest.TestCase):
         self.conn.close()
 
     def test_fts_query_filters_boolean_operators_from_tokens(self):
-        query = (
-            '"Тестовый проект" OR '
-            '"$HOME/projects/Тестовый проект '
-            '(Тестовый проект)"'
-        )
-        fts_expr = _fts_query(query)
+        fts_expr = _fts_query(DEMO_QUERY)
         self.assertIsNotNone(fts_expr)
         self.assertNotIn(" OR OR ", fts_expr)
         self.assertNotIn("AND OR", fts_expr)
         self.assertNotIn("NOT OR", fts_expr)
 
     def test_bm25_handles_boolean_query_with_path_without_syntax_error(self):
-        query = (
-            '"Тестовый проект" OR '
-            '"$HOME/projects/Тестовый проект '
-            '(Тестовый проект)"'
-        )
-        hits = _bm25(self.conn, query, 10)
+        hits = _bm25(self.conn, DEMO_QUERY, 10)
         self.assertEqual(len(hits), 1)
         self.assertEqual(hits[0].turn_id, 1)
 
