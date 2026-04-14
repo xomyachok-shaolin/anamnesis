@@ -1,60 +1,60 @@
 # anamnesis
 
-Persistent hybrid-search memory for AI-CLI sessions.
+Персистентная память с гибридным поиском для сессий AI-CLI.
 
-Ingests historical transcripts from **Claude Code** (main + sub-agents), **Codex CLI**, and — by plugging in a parser — any tool that writes turn-based jsonl. Builds a unified corpus, offers hybrid search (BM25 + semantic via RRF), and exposes it back into the same CLI clients as MCP tools so past context is searchable without leaving the editor.
+Собирает исторические транскрипты из **Claude Code** (main + sub-агенты), **Codex CLI** и — через добавление парсера — любого инструмента, который пишет turn-based jsonl. Строит единый корпус, даёт гибридный поиск (BM25 + семантика через RRF) и отдаёт его обратно в те же клиенты как MCP-инструменты, чтобы прошлый контекст был доступен не выходя из редактора.
 
-Built as an extension layer on top of [`claude-mem`](https://github.com/thedotmack/claude-mem): reuses its SQLite file as the base schema, then adds its own tables, indexes and services alongside. Both coexist without stepping on each other.
+Построено как слой-расширение поверх [`claude-mem`](https://github.com/thedotmack/claude-mem): переиспользует его SQLite-файл как базовую схему и добавляет поверх собственные таблицы, индексы и сервисы. Оба сосуществуют, не конфликтуя.
 
-## Why
+## Зачем
 
-- Transcripts of working sessions with AI agents accumulate across projects and clients. Grepping jsonl is slow and semantically blind; the clients themselves forget everything between restarts.
-- An MCP server that answers `mem_search("hybrid query")` with ranked turns — from any past session, any client — turns the archive into an addressable knowledge surface.
-- Semantic search alone misses exact tokens (IP addresses, CVE IDs, file paths). BM25 alone misses paraphrases. Reciprocal Rank Fusion of both lets either channel lift a relevant hit.
+- Транскрипты рабочих сессий с AI-агентами накапливаются между проектами и клиентами. Grep по jsonl — медленно и семантически слепо; сами клиенты всё забывают между запусками.
+- MCP-сервер, который на `mem_search("запрос")` возвращает ранжированные реплики из любой прошлой сессии и любого клиента, превращает архив в адресуемую поверхность знаний.
+- Только семантика пропускает точные токены (IP, CVE, пути к файлам). Только BM25 не видит парафраз. Reciprocal Rank Fusion обоих даёт каждому каналу шанс вытащить релевантное.
 
-## What you get
+## Что на выходе
 
-- SQLite + Chroma populated from all jsonl sources, tagged by `platform_source`.
-- `anamnesis` CLI: `sync`, `status`, `search`, `verify`, `backup`, `restore`, `audit`, `eval`.
-- Stdio MCP server with four tools — `mem_search`, `mem_get_turn`, `mem_get_session`, `mem_stats` — usable from Claude Code, Codex, or any MCP-compatible client.
-- systemd user timers for incremental sync and daily WAL-safe backups.
-- A golden-query eval harness so changes can be measured, not guessed.
+- SQLite + Chroma, наполненные из всех jsonl-источников, с меткой `platform_source`.
+- CLI `anamnesis`: `sync`, `status`, `search`, `verify`, `backup`, `restore`, `audit`, `eval`.
+- Stdio MCP-сервер с четырьмя инструментами — `mem_search`, `mem_get_turn`, `mem_get_session`, `mem_stats` — из Claude Code, Codex или любого MCP-совместимого клиента.
+- Systemd user-таймеры для инкрементального sync'а и ежедневных WAL-safe бэкапов.
+- Набор golden-запросов для регрессионного контроля — изменения можно измерить, а не угадать.
 
-## Architecture
+## Архитектура
 
 ```
-jsonl sources (Claude Code main / sub-agents / Codex / ...)
+jsonl-источники (Claude Code main / sub-agents / Codex / ...)
        │
-       │  mtime-tracked scanner, per-source parsers
+       │  mtime-tracked scanner, парсер под формат
        ▼
 SQLite ── historical_turns (+ FTS5)                ◄── BM25
        │
-       │  incremental embedder
-       │  (ONNX multilingual MiniLM-L12 by default)
+       │  инкрементальный эмбеддер
+       │  (ONNX multilingual MiniLM-L12 по умолчанию)
        ▼
 Chroma (persistent, file-based)                     ◄── semantic
        │
        │  Reciprocal Rank Fusion (K=60)
        ▼
-stdio MCP server  ──►  Claude Code / Codex / any MCP client
+stdio MCP-сервер  ──►  Claude Code / Codex / любой MCP-клиент
 ```
 
-Design principles:
+Принципы дизайна:
 
-- **File is the idempotency unit.** `anamnesis_ingest_state` tracks `(source, path, mtime_ns)`; re-runs skip unchanged files.
-- **Turn is the storage unit.** `historical_turns` has a UNIQUE key on `(content_session_id, turn_number)`; UPSERTs never duplicate.
-- **Format is the parser's responsibility.** Adding a new CLI agent means writing a parser under `anamnesis/ingest/` and registering a glob in the incremental scanner.
-- **Every operation is audited.** `anamnesis_audit` logs sync / verify / backup / restore with duration and a JSON payload for post-hoc forensics.
+- **Файл — единица идемпотентности.** `anamnesis_ingest_state` хранит `(source, path, mtime_ns)`; повторный запуск пропускает неизменённые файлы.
+- **Turn — единица хранения.** `historical_turns` с UNIQUE-ключом `(content_session_id, turn_number)`; UPSERT никогда не плодит дубликаты.
+- **Формат — ответственность парсера.** Добавить новый CLI-агент = написать парсер в `anamnesis/ingest/` и зарегистрировать glob в incremental-сканере.
+- **Каждая операция аудируется.** `anamnesis_audit` логирует sync / verify / backup / restore с длительностью и JSON-payload'ом для последующего разбора.
 
-## Setup
+## Установка
 
-End-to-end instructions — install, backfill, MCP registration, systemd timers, migration to another machine, known gotchas — live in **[SETUP.md](SETUP.md)**.
+Полная инструкция — установка, бэкфилл, регистрация MCP, systemd-таймеры, переезд на другую машину, известные грабли — в **[SETUP.md](SETUP.md)**.
 
-## Deliberately not included (yet)
+## Что НЕ входит (осознанно отложено)
 
-- Privacy redaction for tokens and secrets at index time.
-- LLM-based event extraction (decisions / todos / facts from transcripts).
-- Cross-encoder reranker stage.
-- Off-site backup target (rclone / git-crypt / zfs send).
+- Privacy-слой — маскировка токенов и секретов при индексации.
+- Event extraction — извлечение решений / TODO / фактов из транскриптов через локальный LLM.
+- Reranker — cross-encoder поверх top-K hybrid результатов.
+- Off-site backup — сейчас только локальный диск (rclone / git-crypt / zfs send планируется).
 
-Each is a future iteration with a measurable trigger for when it should land.
+Каждый пункт — отдельная итерация со своим измеримым критерием включения.
