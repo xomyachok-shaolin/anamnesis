@@ -7,9 +7,23 @@ Type=oneshot
 WorkingDirectory=%h/projects/claude-mem-ext
 Environment=PYTHONPATH=%h/projects/claude-mem-ext
 ExecStart=%h/.claude-mem/semantic-env/bin/python -m mem_ext.cli sync
+
+# --- resource limits ---
+MemoryMax=2G
+MemoryHigh=1500M
+CPUQuota=75%
+TasksMax=64
+
+# --- scheduling ---
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+
+# --- hardening ---
+ProtectSystem=strict
+ReadWritePaths=%h/.claude-mem %h/claude-mem-backups
+PrivateTmp=yes
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=default.target

@@ -6,15 +6,13 @@ Output: ~/claude-mem-backups/claude-mem-YYYYMMDD-HHMMSS.tar.gz
 import os
 import shutil
 import sqlite3
-import sys
 import tarfile
 import time
 from pathlib import Path
 
-DB_PATH = os.path.expanduser("~/.claude-mem/claude-mem.db")
-CHROMA_DIR = os.path.expanduser("~/.claude-mem/semantic-chroma")
-BACKUP_ROOT = os.path.expanduser("~/claude-mem-backups")
-KEEP_LAST = 10
+from mem_ext.config import DB_PATH, CHROMA_DIR, BACKUP_ROOT, BACKUP_KEEP_LAST
+
+KEEP_LAST = BACKUP_KEEP_LAST
 
 
 def _safe_sqlite_copy(dst):

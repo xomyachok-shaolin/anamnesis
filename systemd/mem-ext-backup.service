@@ -6,8 +6,21 @@ Type=oneshot
 WorkingDirectory=%h/projects/claude-mem-ext
 Environment=PYTHONPATH=%h/projects/claude-mem-ext
 ExecStart=%h/.claude-mem/semantic-env/bin/python -m mem_ext.cli backup
+
+# --- resource limits ---
+MemoryMax=1G
+CPUQuota=50%
+TasksMax=16
+
+# --- scheduling ---
 Nice=19
 IOSchedulingClass=idle
+
+# --- hardening ---
+ProtectSystem=strict
+ReadWritePaths=%h/.claude-mem %h/claude-mem-backups
+PrivateTmp=yes
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=default.target

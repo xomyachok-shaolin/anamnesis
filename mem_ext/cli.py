@@ -3,25 +3,22 @@ import argparse
 import json
 import sys
 
-
-def cmd_sync(args):
-    from mem_ext.db import run_migrations
-    from mem_ext.ingest.incremental import run as ingest
-    from mem_ext.indexers.incremental_chroma import run as embed
-
-    applied = run_migrations()
-    if applied:
-        print(f"migrations: {', '.join(applied)}")
-    ing = ingest(verbose=args.verbose)
-    emb = embed(verbose=args.verbose, batch_size=args.batch)
-    print(json.dumps({"ingest": ing, "embed": emb}, ensure_ascii=False))
+from mem_ext.audit import audited, write_health, recent
+from mem_ext.db import connect
 
 
-def cmd_status(args):
-    from mem_ext.db import connect
+def _wal_checkpoint():
+    conn = connect()
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _compute_status() -> dict:
     conn = connect()
     cur = conn.cursor()
-
     totals = {
         "sessions": cur.execute("SELECT COUNT(*) FROM sdk_sessions").fetchone()[0],
         "turns": cur.execute("SELECT COUNT(*) FROM historical_turns").fetchone()[0],
@@ -37,14 +34,13 @@ def cmd_status(args):
         WHERE es.turn_id IS NULL
         """
     ).fetchone()[0]
-    last_ingest = cur.execute(
-        "SELECT MAX(ingested_at) FROM ext_ingest_state"
-    ).fetchone()[0]
+    last_ingest = cur.execute("SELECT MAX(ingested_at) FROM ext_ingest_state").fetchone()[0]
     files_tracked = cur.execute("SELECT COUNT(*) FROM ext_ingest_state").fetchone()[0]
+    recent_audit = recent(5)
     conn.close()
 
     drift = totals["turns"] - embedded
-    report = {
+    return {
         "totals": totals,
         "embedded": embedded,
         "unembedded": unembedded,
@@ -52,12 +48,41 @@ def cmd_status(args):
         "files_tracked": files_tracked,
         "last_ingest": last_ingest,
         "healthy": drift == unembedded and drift >= 0,
+        "recent_audit": recent_audit,
     }
-    print(json.dumps(report, indent=2, ensure_ascii=False))
+
+
+def cmd_sync(args):
+    from mem_ext.db import run_migrations
+    from mem_ext.ingest.incremental import run as ingest
+    from mem_ext.indexers.incremental_chroma import run as embed
+
+    applied = run_migrations()
+    if applied:
+        print(f"migrations: {', '.join(applied)}")
+
+    with audited("sync") as details:
+        ing = ingest(verbose=args.verbose)
+        emb = embed(verbose=args.verbose, batch_size=args.batch)
+        _wal_checkpoint()
+        details.update({
+            "ingest": ing,
+            "embed": emb,
+            "_status": "ok" if ing["errors"] == 0 else "warn",
+        })
+
+    snapshot = _compute_status()
+    snapshot["last_sync"] = {"ingest": ing, "embed": emb}
+    write_health(snapshot)
+    print(json.dumps({"ingest": ing, "embed": emb}, ensure_ascii=False))
+
+
+def cmd_status(args):
+    snapshot = _compute_status()
+    print(json.dumps(snapshot, indent=2, ensure_ascii=False, default=str))
 
 
 def cmd_search(args):
-    from mem_ext.db import connect
     from mem_ext.search.hybrid import search, format_hit
     conn = connect()
     rl = args.role if args.role in ("user", "assistant") else None
@@ -69,8 +94,40 @@ def cmd_search(args):
 
 def cmd_backup(args):
     from mem_ext.backup import run
-    info = run()
+    with audited("backup") as details:
+        info = run()
+        details.update(info)
     print(json.dumps(info, indent=2))
+
+
+def cmd_restore(args):
+    from mem_ext.restore import run
+    with audited("restore") as details:
+        info = run(args.tarball, force=args.force)
+        details.update(info)
+    print(json.dumps(info, indent=2, ensure_ascii=False))
+
+
+def cmd_verify(args):
+    from mem_ext.verify import run
+    with audited("verify") as details:
+        report = run()
+        details.update({
+            "healthy": report["healthy"],
+            "issues_count": len(report["issues"]),
+            "_status": "ok" if report["healthy"] else "warn",
+        })
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    return 0 if report["healthy"] else 1
+
+
+def cmd_audit(args):
+    rows = recent(args.limit)
+    for r in rows:
+        d = r["details"] or {}
+        compact = {k: v for k, v in d.items() if k not in ("_status",)}
+        print(f"{r['at']} [{r['status']}] {r['action']} "
+              f"({r['duration_sec']}s) {json.dumps(compact, ensure_ascii=False)[:150]}")
 
 
 def cmd_eval(args):
@@ -88,12 +145,12 @@ def build_parser():
     ap = argparse.ArgumentParser(prog="mem-ext")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    s = sub.add_parser("sync", help="incremental ingest + embed")
+    s = sub.add_parser("sync", help="incremental ingest + embed + WAL checkpoint")
     s.add_argument("--verbose", action="store_true")
     s.add_argument("--batch", type=int, default=64)
     s.set_defaults(func=cmd_sync)
 
-    st = sub.add_parser("status", help="health + drift report")
+    st = sub.add_parser("status", help="health + drift report + recent audit")
     st.set_defaults(func=cmd_status)
 
     sr = sub.add_parser("search", help="hybrid search")
@@ -105,6 +162,18 @@ def build_parser():
 
     b = sub.add_parser("backup", help="safe tarball of DB + Chroma")
     b.set_defaults(func=cmd_backup)
+
+    r = sub.add_parser("restore", help="restore from a backup tarball")
+    r.add_argument("tarball")
+    r.add_argument("--force", action="store_true")
+    r.set_defaults(func=cmd_restore)
+
+    v = sub.add_parser("verify", help="integrity + consistency check")
+    v.set_defaults(func=cmd_verify)
+
+    au = sub.add_parser("audit", help="recent operational events")
+    au.add_argument("--limit", type=int, default=20)
+    au.set_defaults(func=cmd_audit)
 
     e = sub.add_parser("eval", help="run golden eval")
     e.add_argument("--mode", choices=["semantic", "hybrid"], default="hybrid")

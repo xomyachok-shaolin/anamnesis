@@ -1,10 +1,7 @@
 """Shared SQLite access + migration runner."""
-import os
 import sqlite3
-from pathlib import Path
 
-DB_PATH = os.path.expanduser("~/.claude-mem/claude-mem.db")
-MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
+from mem_ext.config import DB_PATH, MIGRATIONS_DIR
 
 
 def connect():
