@@ -1,14 +1,47 @@
 """Shared SQLite access + migration runner."""
+import functools
 import sqlite3
+import time
 
 from anamnesis.config import DB_PATH, MIGRATIONS_DIR
 
+# SQLite busy timeout: how long a single call will wait for a competing writer
+# before returning SQLITE_BUSY. 30s comfortably covers claude-mem's AI writes.
+BUSY_TIMEOUT_MS = 30_000
+
+# Explicit retry wrapper for write operations. `connect()` already sets a busy
+# timeout, so most contention is absorbed there; this is an extra safety net
+# for bursts during which claude-mem holds the write lock for >30s.
+RETRY_ATTEMPTS = 5
+RETRY_BASE_DELAY_SEC = 0.25
+
 
 def connect():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=BUSY_TIMEOUT_MS / 1000.0)
+    conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def retry_on_busy(fn):
+    """Decorator: retry an operation on SQLITE_BUSY/LOCKED with jittered backoff."""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        import random
+        last = None
+        for attempt in range(RETRY_ATTEMPTS):
+            try:
+                return fn(*args, **kwargs)
+            except sqlite3.OperationalError as e:
+                msg = str(e).lower()
+                if "database is locked" not in msg and "busy" not in msg:
+                    raise
+                last = e
+                delay = RETRY_BASE_DELAY_SEC * (2 ** attempt) * (0.8 + 0.4 * random.random())
+                time.sleep(delay)
+        raise last  # type: ignore[misc]
+    return wrapper
 
 
 def ensure_migrations_table(cur):

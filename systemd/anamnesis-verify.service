@@ -1,0 +1,25 @@
+[Unit]
+Description=anamnesis daily integrity + drift verification
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/anamnesis
+Environment=PYTHONPATH=%h/projects/anamnesis
+ExecStart=%h/.claude-mem/semantic-env/bin/python -m anamnesis.cli verify
+
+# --- resource limits ---
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=32
+
+Nice=19
+IOSchedulingClass=idle
+
+# --- hardening ---
+ProtectSystem=strict
+ReadWritePaths=%h/.claude-mem
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

@@ -117,6 +117,11 @@ def cmd_verify(args):
             "issues_count": len(report["issues"]),
             "_status": "ok" if report["healthy"] else "warn",
         })
+    # Make the latest verification visible without invoking Python:
+    # health.json is the canonical snapshot for external monitors (conky, bar, cron alerts).
+    snapshot = _compute_status()
+    snapshot["last_verify"] = report
+    write_health(snapshot)
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0 if report["healthy"] else 1
 

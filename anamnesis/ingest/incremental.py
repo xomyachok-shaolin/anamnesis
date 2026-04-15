@@ -16,7 +16,7 @@ from anamnesis.config import (
     VSCODE_WORKSPACE_ROOT,
     is_project_in_scope,
 )
-from anamnesis.db import connect
+from anamnesis.db import connect, retry_on_busy
 from anamnesis.ingest.parsers import parse_claude_jsonl, parse_codex_jsonl, ts_to_epoch
 from anamnesis.ingest.vscode_copilot import parse_vscode_copilot_jsonl
 
@@ -154,6 +154,19 @@ def _resolve_errors(cur, path: str) -> int:
     return cur.rowcount
 
 
+@retry_on_busy
+def _ingest_one(cur, source, path, mtime_ns, meta):
+    """Apply UPSERT + state bookkeeping for a single file. Wrapped in BUSY retry."""
+    if meta is None or (meta and not is_project_in_scope(meta["cwd"])):
+        _mark_ingested(cur, source, path, mtime_ns, 0)
+        resolved = _resolve_errors(cur, path)
+        return 0, resolved
+    _, turn_count = _upsert_session(cur, meta)
+    _mark_ingested(cur, source, path, mtime_ns, turn_count)
+    resolved = _resolve_errors(cur, path)
+    return turn_count, resolved
+
+
 def run(verbose=False):
     conn = connect()
     cur = conn.cursor()
@@ -187,9 +200,8 @@ def run(verbose=False):
                 _mark_ingested(cur, source, path, mtime_ns, 0)
                 stats["resolved"] += _resolve_errors(cur, path)
                 continue
-            _, turn_count = _upsert_session(cur, meta)
-            _mark_ingested(cur, source, path, mtime_ns, turn_count)
-            stats["resolved"] += _resolve_errors(cur, path)
+            turn_count, resolved = _ingest_one(cur, source, path, mtime_ns, meta)
+            stats["resolved"] += resolved
             stats["new_files"] += 1
             stats["new_turns"] += turn_count
             if verbose and stats["new_files"] % 20 == 0:
