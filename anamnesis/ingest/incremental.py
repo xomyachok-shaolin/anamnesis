@@ -1,7 +1,7 @@
 """Incremental ingest: detect new/changed jsonl files by mtime, parse, upsert.
 
-Reuses parsers from backfill_v2.py. Uses anamnesis_ingest_state to skip unchanged
-files on repeat runs. Safe to run on a timer.
+Uses anamnesis_ingest_state to skip unchanged files on repeat runs.
+Safe to run on a timer.
 """
 import os
 import sys
@@ -9,13 +9,9 @@ import time
 import uuid
 from glob import glob
 
-sys.path.insert(0, os.path.expanduser("~/.claude-mem"))
-from backfill_v2 import parse_claude_jsonl, parse_codex_jsonl, ts_to_epoch  # noqa: E402
-
-from anamnesis.db import connect  # noqa: E402
-
-CC_ROOT = os.path.expanduser("~/.claude/projects")
-CODEX_ROOT = os.path.expanduser("~/.codex/sessions")
+from anamnesis.config import CC_ROOT, CODEX_ROOT, is_project_in_scope
+from anamnesis.db import connect
+from anamnesis.ingest.parsers import parse_claude_jsonl, parse_codex_jsonl, ts_to_epoch
 
 
 def _discover():
@@ -137,6 +133,9 @@ def run(verbose=False):
                 meta = parse_claude_jsonl(
                     path, is_subagent=(source == "claude-subagent")
                 )
+            if meta and not is_project_in_scope(meta["cwd"]):
+                stats["skipped"] += 1
+                continue
             if not meta:
                 _mark_ingested(cur, source, path, mtime_ns, 0)
                 continue

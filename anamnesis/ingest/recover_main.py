@@ -5,20 +5,13 @@ populating historical_turns. v2 then skipped them via idempotency check.
 This script re-parses the main jsonl files and fills historical_turns
 for sessions that have 0 rows there.
 """
-import json
 import os
 import sys
-import time
 from glob import glob
-from pathlib import Path
 
-# Reuse parser from backfill_v2.py (keep it legacy-importable).
-sys.path.insert(0, os.path.expanduser("~/.claude-mem"))
-from backfill_v2 import parse_claude_jsonl, ts_to_epoch  # noqa: E402
-
-from anamnesis.db import connect  # noqa: E402
-
-CC_ROOT = os.path.expanduser("~/.claude/projects")
+from anamnesis.config import CC_ROOT, is_project_in_scope
+from anamnesis.db import connect
+from anamnesis.ingest.parsers import parse_claude_jsonl
 
 
 def main():
@@ -52,10 +45,11 @@ def main():
             if os.path.getsize(path) < 100:
                 continue
             meta = parse_claude_jsonl(path, is_subagent=False)
+            if meta and not is_project_in_scope(meta["cwd"]):
+                continue
             if not meta or meta["csid"] not in missing_ids:
                 continue
             started = meta["first_ts"] or ""
-            started_epoch = ts_to_epoch(started)
             rows = []
             for i, (role, text, ts) in enumerate(meta["turns"], 1):
                 rows.append((

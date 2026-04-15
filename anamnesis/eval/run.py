@@ -9,14 +9,12 @@ Prints per-query precision and overall score.
 Exits non-zero if any query fails its min_hits threshold.
 """
 import argparse
-import os
 import sys
 from pathlib import Path
 
-DATA = os.path.expanduser("~/.claude-mem")
-CHROMA_DIR = f"{DATA}/semantic-chroma"
-COLL = "history_turns"
-MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+from anamnesis.config import CHROMA_COLLECTION, CHROMA_DIR, EMBED_MODEL, FASTEMBED_CACHE
+
+COLL = CHROMA_COLLECTION
 
 
 def load_golden(path):
@@ -27,7 +25,7 @@ def load_golden(path):
 
 def get_embedder():
     from fastembed import TextEmbedding
-    return TextEmbedding(model_name=MODEL, cache_dir=f"{DATA}/fastembed-models")
+    return TextEmbedding(model_name=EMBED_MODEL, cache_dir=FASTEMBED_CACHE)
 
 
 def get_collection():

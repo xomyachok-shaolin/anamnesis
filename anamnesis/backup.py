@@ -35,7 +35,10 @@ def run():
     chroma_copy = work / "semantic-chroma"
 
     _safe_sqlite_copy(str(db_copy))
-    shutil.copytree(CHROMA_DIR, chroma_copy)
+    if os.path.isdir(CHROMA_DIR):
+        shutil.copytree(CHROMA_DIR, chroma_copy)
+    else:
+        chroma_copy.mkdir(parents=True, exist_ok=True)
 
     archive = Path(BACKUP_ROOT) / f"claude-mem-{stamp}.tar.gz"
     with tarfile.open(archive, "w:gz") as tf:

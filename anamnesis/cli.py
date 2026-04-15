@@ -68,7 +68,7 @@ def cmd_sync(args):
         details.update({
             "ingest": ing,
             "embed": emb,
-            "_status": "ok" if ing["errors"] == 0 else "warn",
+            "_status": "ok" if ing["errors"] == 0 and "error" not in emb else "warn",
         })
 
     snapshot = _compute_status()

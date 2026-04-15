@@ -30,6 +30,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from anamnesis.config import local_embed_model_ready
 from anamnesis.db import connect
 from anamnesis.search.hybrid import (
     _embedder,
@@ -49,6 +50,8 @@ _COL = None
 def _init():
     global _EMB, _COL
     if _EMB is None:
+        if not local_embed_model_ready():
+            raise RuntimeError("embedding model cache is missing")
         print("[anamnesis] loading embedder + Chroma...", file=sys.stderr)
         _EMB = _embedder()
         _COL = _chroma_col()
@@ -108,7 +111,6 @@ def mem_search(
         conn = connect()
 
         if mode == "hybrid":
-            _init()
             hits = hybrid_search(conn, query, top_k=top_k, pool=50, role=rl)
         elif mode == "semantic":
             _init()
@@ -172,7 +174,6 @@ def mem_get_turn(turn_id: int, context: int = 2) -> dict[str, Any]:
         turn_id: id of the target turn (from mem_search results).
         context: number of turns before/after to include (0..10).
     """
-    _init()
     context = max(0, min(context, 10))
     conn = connect()
 

@@ -35,6 +35,29 @@ def ensure_migrations_table(cur):
         )
 
 
+def _table_exists(cur, name: str) -> bool:
+    row = cur.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _should_skip_migration(cur, name: str) -> bool:
+    if name != "004_rename_to_anamnesis.sql":
+        return False
+
+    legacy_tables = ("ext_ingest_state", "ext_embed_state", "ext_audit")
+    renamed_tables = (
+        "anamnesis_ingest_state",
+        "anamnesis_embed_state",
+        "anamnesis_audit",
+    )
+    has_legacy = any(_table_exists(cur, table) for table in legacy_tables)
+    has_renamed = all(_table_exists(cur, table) for table in renamed_tables)
+    return not has_legacy and has_renamed
+
+
 def run_migrations():
     conn = connect()
     cur = conn.cursor()
@@ -42,6 +65,10 @@ def run_migrations():
     applied = {r[0] for r in cur.execute("SELECT name FROM anamnesis_migrations").fetchall()}
     to_apply = sorted(p for p in MIGRATIONS_DIR.glob("*.sql") if p.name not in applied)
     for path in to_apply:
+        if _should_skip_migration(cur, path.name):
+            cur.execute("INSERT INTO anamnesis_migrations(name) VALUES (?)", (path.name,))
+            conn.commit()
+            continue
         sql = path.read_text()
         print(f"Applying {path.name}...")
         cur.executescript(sql)

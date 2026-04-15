@@ -3,17 +3,21 @@
 RRF formula:  score(d) = Σ_r  1 / (K + rank_r(d))
 where K is a constant (60 per Cormack et al. 2009), r iterates over rankers.
 """
-import os
 import re
 import sqlite3
 from dataclasses import dataclass, field
 from typing import Iterable
 
-DATA = os.path.expanduser("~/.claude-mem")
-CHROMA_DIR = f"{DATA}/semantic-chroma"
-COLL = "history_turns"
-MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-RRF_K = 60
+from anamnesis.config import (
+    CHROMA_COLLECTION,
+    CHROMA_DIR,
+    EMBED_MODEL,
+    FASTEMBED_CACHE,
+    RRF_K,
+    local_embed_model_ready,
+)
+
+COLL = CHROMA_COLLECTION
 
 # FTS5 unicode61 splits on non-alphanumeric; quoting a term with "." etc makes it a phrase.
 _token_re = re.compile(r"[\w]+", re.UNICODE)
@@ -78,7 +82,7 @@ def _fts_query(q: str) -> str | None:
 
 def _embedder():
     from fastembed import TextEmbedding
-    return TextEmbedding(model_name=MODEL, cache_dir=f"{DATA}/fastembed-models")
+    return TextEmbedding(model_name=EMBED_MODEL, cache_dir=FASTEMBED_CACHE)
 
 
 def _chroma_col():
@@ -202,9 +206,15 @@ def search(
 ) -> list[Hit]:
     """Hybrid search. Returns fused top-k Hits."""
     bm25_hits = _bm25(conn, query, pool)
-    emb = _embedder()
-    col = _chroma_col()
-    sem_hits = _semantic(emb, col, query, pool, role=role)
+    if local_embed_model_ready():
+        try:
+            emb = _embedder()
+            col = _chroma_col()
+            sem_hits = _semantic(emb, col, query, pool, role=role)
+        except Exception:
+            sem_hits = []
+    else:
+        sem_hits = []
 
     by_id: dict[int, Hit] = {}
     for h in bm25_hits:

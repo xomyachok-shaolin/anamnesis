@@ -3,21 +3,23 @@
 Uses anamnesis_embed_state to skip already-embedded turns. Safe to run on a timer
 after ingest.incremental.
 """
-import os
-import sys
 import time
 
+from anamnesis.config import (
+    CHROMA_COLLECTION,
+    CHROMA_DIR,
+    EMBED_MODEL,
+    FASTEMBED_CACHE,
+    local_embed_model_ready,
+)
 from anamnesis.db import connect
 
-DATA = os.path.expanduser("~/.claude-mem")
-CHROMA_DIR = f"{DATA}/semantic-chroma"
-COLL = "history_turns"
-MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+COLL = CHROMA_COLLECTION
 
 
 def _embedder():
     from fastembed import TextEmbedding
-    return TextEmbedding(model_name=MODEL, cache_dir=f"{DATA}/fastembed-models")
+    return TextEmbedding(model_name=EMBED_MODEL, cache_dir=FASTEMBED_CACHE)
 
 
 def _chroma_col():
@@ -32,7 +34,6 @@ def _chroma_col():
 def run(batch_size=64, limit=None, verbose=False):
     conn = connect()
     cur = conn.cursor()
-    col = _chroma_col()
 
     # Turns not yet in anamnesis_embed_state for this collection
     q = """
@@ -53,9 +54,26 @@ def run(batch_size=64, limit=None, verbose=False):
         conn.close()
         return {"embedded": 0, "elapsed": 0}
 
-    emb = _embedder()
-    # warmup
-    list(emb.embed(["init"]))
+    if not local_embed_model_ready():
+        conn.close()
+        return {
+            "embedded": 0,
+            "elapsed": 0,
+            "error": "embedding model cache is missing",
+        }
+
+    try:
+        col = _chroma_col()
+        emb = _embedder()
+        # warmup
+        list(emb.embed(["init"]))
+    except Exception as exc:
+        conn.close()
+        return {
+            "embedded": 0,
+            "elapsed": 0,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
     t0 = time.time()
     buf_docs, buf_ids, buf_metas, buf_turn_ids = [], [], [], []
