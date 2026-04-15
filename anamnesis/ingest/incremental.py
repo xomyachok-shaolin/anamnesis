@@ -9,9 +9,16 @@ import time
 import uuid
 from glob import glob
 
-from anamnesis.config import CC_ROOT, CODEX_ROOT, is_project_in_scope
+from anamnesis.config import (
+    CC_ROOT,
+    CODEX_ROOT,
+    INGEST_VSCODE_COPILOT,
+    VSCODE_WORKSPACE_ROOT,
+    is_project_in_scope,
+)
 from anamnesis.db import connect
 from anamnesis.ingest.parsers import parse_claude_jsonl, parse_codex_jsonl, ts_to_epoch
+from anamnesis.ingest.vscode_copilot import parse_vscode_copilot_jsonl
 
 
 def _discover():
@@ -22,6 +29,17 @@ def _discover():
         yield "claude-subagent", p, os.stat(p).st_mtime_ns
     for p in glob(os.path.join(CODEX_ROOT, "*", "*", "*", "*.jsonl")):
         yield "codex", p, os.stat(p).st_mtime_ns
+    if INGEST_VSCODE_COPILOT:
+        for p in glob(
+            os.path.join(VSCODE_WORKSPACE_ROOT, "*", "chatSessions", "*.jsonl")
+        ):
+            # Skip tiny empty stubs
+            try:
+                if os.path.getsize(p) < 500:
+                    continue
+            except OSError:
+                continue
+            yield "vscode-copilot", p, os.stat(p).st_mtime_ns
 
 
 def _needs_ingest(cur, source, path, mtime_ns):
@@ -113,11 +131,37 @@ def _upsert_session(cur, meta):
     return memory_id, len(meta["turns"])
 
 
+def _record_error(cur, source: str, path: str, exc: Exception) -> None:
+    cur.execute(
+        """
+        INSERT INTO anamnesis_ingest_errors
+          (source, path, error_class, error_message)
+        VALUES (?, ?, ?, ?)
+        """,
+        (source, path, type(exc).__name__, str(exc)[:2000]),
+    )
+
+
+def _resolve_errors(cur, path: str) -> int:
+    cur.execute(
+        """
+        UPDATE anamnesis_ingest_errors
+        SET resolved_at = datetime('now')
+        WHERE path = ? AND resolved_at IS NULL
+        """,
+        (path,),
+    )
+    return cur.rowcount
+
+
 def run(verbose=False):
     conn = connect()
     cur = conn.cursor()
 
-    stats = {"total": 0, "skipped": 0, "new_files": 0, "new_turns": 0, "errors": 0}
+    stats = {
+        "total": 0, "skipped": 0, "new_files": 0, "new_turns": 0,
+        "errors": 0, "resolved": 0,
+    }
     for source, path, mtime_ns in _discover():
         stats["total"] += 1
         if not _needs_ingest(cur, source, path, mtime_ns):
@@ -126,9 +170,12 @@ def run(verbose=False):
         try:
             if os.path.getsize(path) < 100:
                 _mark_ingested(cur, source, path, mtime_ns, 0)
+                stats["resolved"] += _resolve_errors(cur, path)
                 continue
             if source == "codex":
                 meta = parse_codex_jsonl(path)
+            elif source == "vscode-copilot":
+                meta = parse_vscode_copilot_jsonl(path)
             else:
                 meta = parse_claude_jsonl(
                     path, is_subagent=(source == "claude-subagent")
@@ -138,9 +185,11 @@ def run(verbose=False):
                 continue
             if not meta:
                 _mark_ingested(cur, source, path, mtime_ns, 0)
+                stats["resolved"] += _resolve_errors(cur, path)
                 continue
             _, turn_count = _upsert_session(cur, meta)
             _mark_ingested(cur, source, path, mtime_ns, turn_count)
+            stats["resolved"] += _resolve_errors(cur, path)
             stats["new_files"] += 1
             stats["new_turns"] += turn_count
             if verbose and stats["new_files"] % 20 == 0:
@@ -149,6 +198,10 @@ def run(verbose=False):
                 conn.commit()
         except Exception as e:
             stats["errors"] += 1
+            try:
+                _record_error(cur, source, path, e)
+            except Exception:
+                pass
             if verbose:
                 print(f"  ERROR {path}: {e}", file=sys.stderr)
 

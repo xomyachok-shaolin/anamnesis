@@ -20,6 +20,14 @@ HEALTH_FILE = str(DATA_DIR / "health.json")
 # --- Source roots ---
 CC_ROOT = _expand_path(os.environ.get("ANAMNESIS_CC_ROOT", "~/.claude/projects"))
 CODEX_ROOT = _expand_path(os.environ.get("ANAMNESIS_CODEX_ROOT", "~/.codex/sessions"))
+VSCODE_WORKSPACE_ROOT = _expand_path(
+    os.environ.get(
+        "ANAMNESIS_VSCODE_ROOT",
+        "~/.config/Code/User/workspaceStorage",
+    )
+)
+# Opt-in to VS Code Copilot chat ingest (disabled by default — workspace-specific).
+INGEST_VSCODE_COPILOT = os.environ.get("ANAMNESIS_INGEST_VSCODE_COPILOT", "0") == "1"
 PROJECT_PREFIXES = tuple(
     _expand_path(part.strip())
     for part in os.environ.get("ANAMNESIS_PROJECT_PREFIXES", "").split(os.pathsep)

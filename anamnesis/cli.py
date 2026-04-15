@@ -130,6 +130,38 @@ def cmd_audit(args):
               f"({r['duration_sec']}s) {json.dumps(compact, ensure_ascii=False)[:150]}")
 
 
+def cmd_cross_sync(args):
+    from anamnesis.sync.cross import run as run_cross
+    out = run_cross(peers=args.peer or None, verbose=args.verbose)
+    print(json.dumps(out, indent=2, ensure_ascii=False))
+    bad = [r for r in out.get("results", []) if not r.get("ok") and not r.get("skipped")]
+    return 0 if not bad else 2
+
+
+def cmd_errors(args):
+    conn = connect()
+    rows = conn.execute(
+        """
+        SELECT id, at, source, path, error_class, error_message, resolved_at
+        FROM anamnesis_ingest_errors
+        WHERE (? = 1) OR resolved_at IS NULL
+        ORDER BY at DESC LIMIT ?
+        """,
+        (1 if args.all else 0, args.limit),
+    ).fetchall()
+    conn.close()
+    if not rows:
+        print("no ingest errors recorded")
+        return 0
+    for r in rows:
+        marker = "✓ resolved" if r["resolved_at"] else "✗ open"
+        print(f"[{r['at']}] {marker} {r['source']} {r['error_class']}")
+        print(f"  {r['path']}")
+        print(f"  {r['error_message'][:200]}")
+        print()
+    return 0
+
+
 def cmd_eval(args):
     from anamnesis.eval.run import evaluate, load_golden
     from pathlib import Path
@@ -174,6 +206,18 @@ def build_parser():
     au = sub.add_parser("audit", help="recent operational events")
     au.add_argument("--limit", type=int, default=20)
     au.set_defaults(func=cmd_audit)
+
+    cs = sub.add_parser("cross-sync", help="bidirectional jsonl rsync with peers")
+    cs.add_argument("--peer", action="append",
+                    help="peer 'user@host'. Repeatable. If omitted, uses ANAMNESIS_PEERS / peers.txt")
+    cs.add_argument("--verbose", action="store_true")
+    cs.set_defaults(func=cmd_cross_sync)
+
+    er = sub.add_parser("errors", help="show ingest errors")
+    er.add_argument("--limit", type=int, default=50)
+    er.add_argument("--all", action="store_true",
+                    help="include resolved errors (default: open only)")
+    er.set_defaults(func=cmd_errors)
 
     e = sub.add_parser("eval", help="run golden eval")
     e.add_argument("--mode", choices=["semantic", "hybrid"], default="hybrid")
