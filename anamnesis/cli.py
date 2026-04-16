@@ -61,20 +61,27 @@ def cmd_sync(args):
     if applied:
         print(f"migrations: {', '.join(applied)}")
 
+    from anamnesis.entities import backfill as entity_backfill
+    from anamnesis.threading import compute as thread_compute
+
     with audited("sync") as details:
         ing = ingest(verbose=args.verbose)
         emb = embed(verbose=args.verbose, batch_size=args.batch)
+        ent = entity_backfill()
+        thr = thread_compute()
         _wal_checkpoint()
         details.update({
             "ingest": ing,
             "embed": emb,
+            "entities": ent,
+            "threads": thr,
             "_status": "ok" if ing["errors"] == 0 and "error" not in emb else "warn",
         })
 
     snapshot = _compute_status()
-    snapshot["last_sync"] = {"ingest": ing, "embed": emb}
+    snapshot["last_sync"] = {"ingest": ing, "embed": emb, "entities": ent, "threads": thr}
     write_health(snapshot)
-    print(json.dumps({"ingest": ing, "embed": emb}, ensure_ascii=False))
+    print(json.dumps({"ingest": ing, "embed": emb, "entities": ent, "threads": thr}, ensure_ascii=False))
 
 
 def cmd_status(args):
@@ -167,6 +174,24 @@ def cmd_errors(args):
     return 0
 
 
+def cmd_entities(args):
+    from anamnesis.entities import backfill, stats
+    with audited("entities") as details:
+        r = backfill()
+        details.update(r)
+    s = stats()
+    print(json.dumps({"backfill": r, "stats": s}, indent=2, ensure_ascii=False))
+
+
+def cmd_threads(args):
+    from anamnesis.threading import compute, stats
+    with audited("threads") as details:
+        r = compute()
+        details.update(r)
+    s = stats()
+    print(json.dumps({"compute": r, "stats": s}, indent=2, ensure_ascii=False))
+
+
 def cmd_eval(args):
     from anamnesis.eval.run import evaluate, load_golden
     from pathlib import Path
@@ -223,6 +248,12 @@ def build_parser():
     er.add_argument("--all", action="store_true",
                     help="include resolved errors (default: open only)")
     er.set_defaults(func=cmd_errors)
+
+    ent = sub.add_parser("entities", help="extract entities (paths, URLs) from turns")
+    ent.set_defaults(func=cmd_entities)
+
+    th = sub.add_parser("threads", help="recompute session continuation threads")
+    th.set_defaults(func=cmd_threads)
 
     e = sub.add_parser("eval", help="run golden eval")
     e.add_argument("--mode", choices=["semantic", "hybrid"], default="hybrid")
