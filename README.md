@@ -16,7 +16,8 @@
 
 - SQLite + Chroma, наполненные из всех jsonl-источников, с меткой `platform_source`.
 - CLI `anamnesis`: `sync`, `status`, `search`, `verify`, `backup`, `restore`, `audit`, `eval`.
-- Stdio MCP-сервер с шестью инструментами — `mem_search`, `mem_probe`, `mem_get_turn`, `mem_get_session`, `mem_stats`, `mem_audit_tail` — из Claude Code, Codex или любого MCP-совместимого клиента.
+- Stdio MCP-сервер с семью инструментами — `mem_search`, `mem_probe`, `mem_entity`, `mem_get_turn`, `mem_get_session`, `mem_stats`, `mem_audit_tail` — из Claude Code, Codex или любого MCP-совместимого клиента.
+- Entity-extraction sidecar: детерминированные регулярки извлекают из каждого turn'а файловые пути и URL в отдельную таблицу `anamnesis_entities`. `mem_entity(value)` отвечает на «что мы делали с этим файлом / этим URL» — класс запросов, который BM25/семантика обрабатывают ненадёжно.
 - Пассивная relevance-телеметрия: каждый MCP-вызов пишется в `anamnesis_audit` (action, status, duration, детали). Корреляция `mem_search → mem_get_turn` по близости timestamp'ов даёт сигнал «какие хиты агент реально читает», без явного feedback-цикла; этот сигнал — основа для будущего reranker'а и augmentation golden-eval.
 - Чёткий контракт двух режимов поиска: `mem_probe` отвечает на «встречается ли **этот** токен» (FTS, точно, без трансформаций — coverage-oracle одним SQL с разбивкой по источникам, месяцам и сессиям); `mem_search` — на «встречается ли это **или похожее**» (BM25 + семантика через ONNX multilingual + RRF). Пустой `mem_search` дополнительно возвращает `searched: {n_turns, date_range_indexed, turns_by_source}` — клиент не спутает «не нашлось» с «корпус пуст».
 - Systemd user-таймеры для инкрементального sync'а и ежедневных WAL-safe бэкапов.

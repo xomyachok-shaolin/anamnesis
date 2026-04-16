@@ -10,3 +10,10 @@ eval_results/
 # Personal golden queries — kept local, never committed.
 golden.local.yaml
 golden.local.*
+
+# Django codex junk (wrong PATH hit)
+config/cache/
+config/codex.sqlite3
+config/hypercorn.toml
+config/logs/
+config/secret_key

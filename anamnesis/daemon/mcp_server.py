@@ -5,6 +5,7 @@ stdio MCP server exposing hybrid memory search to Claude Code.
 Tools:
   - mem_search(query, top_k=10, role=any, mode=hybrid) → ranked fuzzy hits
   - mem_probe(term, top_sessions=3) → exact-token coverage oracle
+  - mem_entity(value, entity_type=None, limit=20) → scoped entity lookup
   - mem_get_turn(turn_id, context=2) → full turn + N surrounding turns
   - mem_get_session(session_id, max_turns=50) → session overview
   - mem_stats() → corpus statistics
@@ -622,6 +623,95 @@ def mem_audit_tail(limit: int = 20, action: str | None = None) -> dict[str, Any]
     if action:
         rows = [r for r in rows if r["action"] == action][:limit]
     return {"count": len(rows), "records": rows}
+
+
+@mcp.tool()
+@_audited_tool("mem_entity", summarize=lambda a, kw, r: {
+    "value": (kw.get("value") or (a[0] if a else ""))[:200],
+    "total": r.get("total") if isinstance(r, dict) else None,
+})
+def mem_entity(
+    value: str,
+    entity_type: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """Find turns that reference a specific entity (file path, URL, etc.).
+
+    Searches the anamnesis_entities sidecar table — deterministic regex
+    extraction, not fuzzy. Good for scoped queries like "what did we do
+    with config.py?" that BM25/semantic handle poorly.
+
+    Args:
+        value: entity value or substring to search (e.g. "config.py",
+            "/home/user/project", "github.com/repo"). Uses SQL LIKE
+            matching so partial paths work.
+        entity_type: optional filter — 'path', 'url', or None for all.
+        limit: max results (1..100).
+
+    Returns:
+        {total, entities: [{entity_type, value, turn_id, role, timestamp,
+         session, project, title, source, snippet}]}
+    """
+    value = (value or "").strip()
+    if not value:
+        return {"error": "empty value"}
+    limit = max(1, min(limit, 100))
+    like_pat = f"%{value}%"
+    conn = connect()
+    try:
+        if entity_type:
+            rows = conn.execute(
+                """
+                SELECT e.entity_type, e.value, e.turn_id,
+                       ht.role, ht.timestamp, ht.content_session_id,
+                       ht.platform_source, substr(ht.text, 1, 300) AS snippet,
+                       s.custom_title, s.project
+                FROM anamnesis_entities e
+                JOIN historical_turns ht ON ht.id = e.turn_id
+                LEFT JOIN sdk_sessions s
+                       ON s.content_session_id = ht.content_session_id
+                WHERE e.value LIKE ? AND e.entity_type = ?
+                ORDER BY ht.timestamp DESC
+                LIMIT ?
+                """,
+                (like_pat, entity_type, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT e.entity_type, e.value, e.turn_id,
+                       ht.role, ht.timestamp, ht.content_session_id,
+                       ht.platform_source, substr(ht.text, 1, 300) AS snippet,
+                       s.custom_title, s.project
+                FROM anamnesis_entities e
+                JOIN historical_turns ht ON ht.id = e.turn_id
+                LEFT JOIN sdk_sessions s
+                       ON s.content_session_id = ht.content_session_id
+                WHERE e.value LIKE ?
+                ORDER BY ht.timestamp DESC
+                LIMIT ?
+                """,
+                (like_pat, limit),
+            ).fetchall()
+    finally:
+        conn.close()
+
+    out = [
+        {
+            "entity_type": r["entity_type"],
+            "value": r["value"],
+            "turn_id": r["turn_id"],
+            "role": r["role"],
+            "timestamp": (r["timestamp"] or "")[:19],
+            "session": r["content_session_id"],
+            "project": r["project"] or "",
+            "title": r["custom_title"] or "",
+            "source": r["platform_source"],
+            "snippet": r["snippet"],
+        }
+        for r in rows
+    ]
+    return {"query": value, "entity_type": entity_type, "total": len(out), "entities": out}
 
 
 if __name__ == "__main__":
