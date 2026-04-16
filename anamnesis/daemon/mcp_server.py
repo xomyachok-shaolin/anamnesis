@@ -6,6 +6,7 @@ Tools:
   - mem_search(query, top_k=10, role=any, mode=hybrid) → ranked fuzzy hits
   - mem_probe(term, top_sessions=3) → exact-token coverage oracle
   - mem_entity(value, entity_type=None, limit=20) → scoped entity lookup
+  - mem_get_thread(session_id) → continuation chain for a session
   - mem_get_turn(turn_id, context=2) → full turn + N surrounding turns
   - mem_get_session(session_id, max_turns=50) → session overview
   - mem_stats() → corpus statistics
@@ -40,6 +41,7 @@ from typing import Any, Callable
 from mcp.server.fastmcp import FastMCP
 
 from anamnesis.audit import audited, recent as recent_audit
+from anamnesis.threading import get_thread
 from anamnesis.config import local_embed_model_ready
 from anamnesis.db import connect
 from anamnesis.search.hybrid import (
@@ -600,6 +602,43 @@ def mem_stats() -> dict[str, Any]:
         "turns_by_source": by_source,
         "turns_by_role": by_role,
         "top_projects": top_projects,
+    }
+
+
+@mcp.tool()
+@_audited_tool("mem_get_thread", summarize=lambda a, kw, r: {
+    "session": kw.get("session_id") or (a[0] if a else None),
+    "thread_length": len(r.get("sessions") or []) if isinstance(r, dict) else 0,
+})
+def mem_get_thread(session_id: str) -> dict[str, Any]:
+    """Get the continuation thread for a session.
+
+    A thread is a chain of sessions in the same project with temporal
+    proximity (< 7 days gap). Returns all sessions in the thread, ordered
+    chronologically, with the target session marked.
+
+    Subagent sessions are excluded — they are already structurally linked
+    to their parent via the ':' prefix in content_session_id.
+
+    Args:
+        session_id: content_session_id of any session in the thread.
+
+    Returns:
+        {session_id, thread_length, sessions: [{session, order, project,
+         source, prompt, started_at, title, prompt_count, is_target}]}
+    """
+    sessions = get_thread(session_id)
+    if not sessions:
+        return {
+            "session_id": session_id,
+            "thread_length": 0,
+            "sessions": [],
+            "hint": "Session not found in threading index. Run `anamnesis threads` to recompute.",
+        }
+    return {
+        "session_id": session_id,
+        "thread_length": len(sessions),
+        "sessions": sessions,
     }
 
 

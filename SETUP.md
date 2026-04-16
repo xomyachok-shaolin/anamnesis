@@ -6,7 +6,7 @@
 
 - Единая SQLite-база + векторный индекс Chroma со всей историей независимо от клиента.
 - Hybrid-поиск: BM25 (точные токены) + семантика (ONNX multilingual) + RRF-fusion.
-- MCP-инструменты (`mem_search`, `mem_probe`, `mem_entity`, `mem_get_turn`, `mem_get_session`, `mem_stats`, `mem_audit_tail`), доступные в любом MCP-совместимом клиенте. `mem_probe(term)` — точный FTS-счётчик; `mem_search` — ранжирующий поиск; `mem_entity(value)` — scoped lookup по извлечённым сущностям (пути, URL). Каждый вызов логируется в `anamnesis_audit`; `mem_audit_tail` возвращает хвост для интроспекции.
+- MCP-инструменты (`mem_search`, `mem_probe`, `mem_entity`, `mem_get_thread`, `mem_get_turn`, `mem_get_session`, `mem_stats`, `mem_audit_tail`), доступные в любом MCP-совместимом клиенте. `mem_probe(term)` — точный FTS-счётчик; `mem_search` — ранжирующий поиск; `mem_entity(value)` — scoped lookup по сущностям; `mem_get_thread(session_id)` — цепочка продолжений сессии. Каждый вызов логируется в `anamnesis_audit`; `mem_audit_tail` возвращает хвост для интроспекции.
 - Инкрементальный sync новых сессий и ежедневные бэкапы через systemd user-таймеры.
 - Команда `anamnesis restore` для отката и переезда на другую машину.
 
