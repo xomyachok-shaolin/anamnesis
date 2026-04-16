@@ -64,6 +64,22 @@ class MCPPServerTests(unittest.TestCase):
         self.assertIn("hybrid", result["hint"])
         self.assertTrue(conn.closed)
 
+    def test_mem_search_attaches_coverage_on_empty_hits(self):
+        conn = _FakeConn()
+        coverage = {"n_turns": 42, "date_range_indexed": ["2025-01-01", "2026-04-15"]}
+        with (
+            patch.object(mcp_server, "connect", return_value=conn),
+            patch.object(mcp_server, "_bm25", return_value=[]),
+            patch.object(mcp_server, "_safe_coverage", return_value=coverage),
+        ):
+            result = mcp_server.mem_search("nothing here", mode="bm25")
+
+        self.assertEqual(result["total"], 0)
+        self.assertEqual(result["hits"], [])
+        self.assertEqual(result["searched"], coverage)
+        self.assertNotIn("error", result)
+        self.assertTrue(conn.closed)
+
     def test_mem_search_bm25_does_not_load_embedder(self):
         conn = _FakeConn()
         with (

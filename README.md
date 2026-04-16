@@ -16,7 +16,8 @@
 
 - SQLite + Chroma, наполненные из всех jsonl-источников, с меткой `platform_source`.
 - CLI `anamnesis`: `sync`, `status`, `search`, `verify`, `backup`, `restore`, `audit`, `eval`.
-- Stdio MCP-сервер с четырьмя инструментами — `mem_search`, `mem_get_turn`, `mem_get_session`, `mem_stats` — из Claude Code, Codex или любого MCP-совместимого клиента.
+- Stdio MCP-сервер с пятью инструментами — `mem_search`, `mem_probe`, `mem_get_turn`, `mem_get_session`, `mem_stats` — из Claude Code, Codex или любого MCP-совместимого клиента.
+- Чёткий контракт двух режимов поиска: `mem_probe` отвечает на «встречается ли **этот** токен» (FTS, точно, без трансформаций — coverage-oracle одним SQL с разбивкой по источникам, месяцам и сессиям); `mem_search` — на «встречается ли это **или похожее**» (BM25 + семантика через ONNX multilingual + RRF). Пустой `mem_search` дополнительно возвращает `searched: {n_turns, date_range_indexed, turns_by_source}` — клиент не спутает «не нашлось» с «корпус пуст».
 - Systemd user-таймеры для инкрементального sync'а и ежедневных WAL-safe бэкапов.
 - Набор golden-запросов для регрессионного контроля — изменения можно измерить, а не угадать.
 

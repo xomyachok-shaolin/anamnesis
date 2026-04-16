@@ -3,7 +3,8 @@
 stdio MCP server exposing hybrid memory search to Claude Code.
 
 Tools:
-  - mem_search(query, top_k=10, role=any, mode=hybrid) → list of hits
+  - mem_search(query, top_k=10, role=any, mode=hybrid) → ranked fuzzy hits
+  - mem_probe(term, top_sessions=3) → exact-token coverage oracle
   - mem_get_turn(turn_id, context=2) → full turn + N surrounding turns
   - mem_get_session(session_id, max_turns=50) → session overview
   - mem_stats() → corpus statistics
@@ -63,13 +64,54 @@ def _init():
 mcp = FastMCP("anamnesis")
 
 
+def _corpus_coverage(conn) -> dict[str, Any]:
+    """Return a compact snapshot of what the corpus actually contains.
+
+    Attached to empty/erroring mem_search responses so callers cannot
+    confuse "no data indexed" with "searched and found nothing".
+    """
+    totals = conn.execute(
+        "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM historical_turns"
+    ).fetchone()
+    by_source = {
+        r[0]: r[1]
+        for r in conn.execute(
+            "SELECT platform_source, COUNT(*) FROM historical_turns "
+            "GROUP BY platform_source"
+        ).fetchall()
+    }
+    return {
+        "n_turns": totals[0],
+        "date_range_indexed": [
+            (totals[1] or "")[:10],
+            (totals[2] or "")[:10],
+        ],
+        "turns_by_source": by_source,
+        "hint": (
+            "Empty result means this query didn't match — not that the corpus "
+            "is empty. Use mem_probe(term) for cross-source token frequency, "
+            "or retry with different phrasing."
+        ),
+    }
+
+
+def _safe_coverage(conn) -> dict[str, Any] | None:
+    if conn is None:
+        return None
+    try:
+        return _corpus_coverage(conn)
+    except Exception:
+        return None
+
+
 def _search_error_response(
     query: str,
     mode: str,
     error: str,
     hint: str,
+    coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    resp: dict[str, Any] = {
         "query": query,
         "mode": mode,
         "total": 0,
@@ -77,6 +119,9 @@ def _search_error_response(
         "error": error,
         "hint": hint,
     }
+    if coverage is not None:
+        resp["searched"] = coverage
+    return resp
 
 
 def _fts_syntax_hint() -> str:
@@ -107,6 +152,7 @@ def mem_search(
     top_k = max(1, min(top_k, 50))
     rl = role if role in ("user", "assistant") else None
     conn = None
+    coverage: dict[str, Any] | None = None
     try:
         conn = connect()
 
@@ -123,6 +169,7 @@ def mem_search(
                 mode=mode,
                 error=f"unknown mode: {mode}",
                 hint="Use one of: hybrid, semantic, bm25.",
+                coverage=_safe_coverage(conn),
             )
     except sqlite3.Error as exc:
         msg = str(exc)
@@ -134,6 +181,7 @@ def mem_search(
             mode=mode,
             error=msg,
             hint=hint,
+            coverage=_safe_coverage(conn),
         )
     except Exception as exc:
         return _search_error_response(
@@ -141,7 +189,11 @@ def mem_search(
             mode=mode,
             error=f"{type(exc).__name__}: {exc}",
             hint="Search failed inside the MCP server. Retry with a simpler query or restart the server.",
+            coverage=_safe_coverage(conn),
         )
+    else:
+        if not hits:
+            coverage = _safe_coverage(conn)
     finally:
         if conn is not None:
             conn.close()
@@ -163,7 +215,10 @@ def mem_search(
             "project": h.meta.get("project", ""),
             "snippet": (h.text or "")[:400],
         })
-    return {"query": query, "mode": mode, "total": len(out), "hits": out}
+    resp: dict[str, Any] = {"query": query, "mode": mode, "total": len(out), "hits": out}
+    if coverage is not None:
+        resp["searched"] = coverage
+    return resp
 
 
 @mcp.tool()
@@ -276,6 +331,151 @@ def mem_get_session(session_id: str, max_turns: int = 50) -> dict[str, Any]:
             for r in turns
         ],
     }
+
+
+def _fts_phrase(term: str) -> str:
+    # FTS5: double-quote term as a phrase; escape embedded quotes by doubling.
+    return '"' + term.replace('"', '""') + '"'
+
+
+@mcp.tool()
+def mem_probe(term: str, top_sessions: int = 3) -> dict[str, Any]:
+    """Coverage oracle: does this exact token appear in the corpus, where, when.
+
+    Contract: probe answers "is there **this** in the corpus", not "is there
+    anything similar". No transliteration, no fuzzy matching, no stemming —
+    just FTS on the literal term. For fuzzy/semantic variants call mem_search.
+
+    Use before concluding "no records" from an empty mem_search result: if
+    probe also returns zero, the term genuinely is not in historical_turns
+    (under this spelling).
+
+    Args:
+        term: single word or short phrase to probe.
+        top_sessions: number of highest-density sessions to return (0..10).
+
+    Returns:
+        {
+          term, total_matches,
+          date_range: [min, max],
+          by_source: {source: count},
+          by_month: [{month, count}],
+          top_sessions: [{session, project, title, matches, last_seen}]
+        }
+    """
+    term = (term or "").strip()
+    if not term:
+        return {"error": "empty term"}
+    fts_expr = _fts_phrase(term)
+    top_sessions = max(0, min(top_sessions, 10))
+
+    conn = connect()
+    try:
+        try:
+            totals = conn.execute(
+                """
+                SELECT COUNT(*), MIN(ht.timestamp), MAX(ht.timestamp)
+                FROM historical_turns ht
+                WHERE ht.id IN (
+                    SELECT rowid FROM historical_turns_fts
+                    WHERE historical_turns_fts MATCH ?
+                )
+                """,
+                (fts_expr,),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            return {
+                "term": term,
+                "error": str(exc),
+                "hint": "FTS5 rejected the query. Try a simpler term.",
+            }
+        total = totals[0] or 0
+        if total == 0:
+            return {
+                "term": term,
+                "total_matches": 0,
+                "date_range": ["", ""],
+                "by_source": {},
+                "by_month": [],
+                "top_sessions": [],
+                "hint": (
+                    "Zero matches for the exact term. For fuzzy/semantic "
+                    "variants (different spellings, morphology, translations) "
+                    "call mem_search instead — it uses BM25 + multilingual "
+                    "embeddings."
+                ),
+            }
+
+        by_source = {
+            r[0]: r[1]
+            for r in conn.execute(
+                """
+                SELECT ht.platform_source, COUNT(*)
+                FROM historical_turns ht
+                WHERE ht.id IN (
+                    SELECT rowid FROM historical_turns_fts
+                    WHERE historical_turns_fts MATCH ?
+                )
+                GROUP BY ht.platform_source
+                """,
+                (fts_expr,),
+            ).fetchall()
+        }
+        by_month = [
+            {"month": r[0], "count": r[1]}
+            for r in conn.execute(
+                """
+                SELECT substr(ht.timestamp, 1, 7) AS ym, COUNT(*)
+                FROM historical_turns ht
+                WHERE ht.id IN (
+                    SELECT rowid FROM historical_turns_fts
+                    WHERE historical_turns_fts MATCH ?
+                )
+                GROUP BY ym
+                ORDER BY ym
+                """,
+                (fts_expr,),
+            ).fetchall()
+            if r[0]
+        ]
+        top = []
+        if top_sessions > 0:
+            top = [
+                {
+                    "session": r[0],
+                    "project": r[1] or "",
+                    "title": r[2] or "",
+                    "matches": r[3],
+                    "last_seen": (r[4] or "")[:19],
+                }
+                for r in conn.execute(
+                    """
+                    SELECT ht.content_session_id, s.project, s.custom_title,
+                           COUNT(*) AS n, MAX(ht.timestamp)
+                    FROM historical_turns ht
+                    LEFT JOIN sdk_sessions s
+                           ON s.content_session_id = ht.content_session_id
+                    WHERE ht.id IN (
+                        SELECT rowid FROM historical_turns_fts
+                        WHERE historical_turns_fts MATCH ?
+                    )
+                    GROUP BY ht.content_session_id
+                    ORDER BY n DESC, MAX(ht.timestamp) DESC
+                    LIMIT ?
+                    """,
+                    (fts_expr, top_sessions),
+                ).fetchall()
+            ]
+        return {
+            "term": term,
+            "total_matches": total,
+            "date_range": [(totals[1] or "")[:10], (totals[2] or "")[:10]],
+            "by_source": by_source,
+            "by_month": by_month,
+            "top_sessions": top,
+        }
+    finally:
+        conn.close()
 
 
 @mcp.tool()

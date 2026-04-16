@@ -6,7 +6,7 @@
 
 - Единая SQLite-база + векторный индекс Chroma со всей историей независимо от клиента.
 - Hybrid-поиск: BM25 (точные токены) + семантика (ONNX multilingual) + RRF-fusion.
-- MCP-инструменты (`mem_search`, `mem_get_turn`, `mem_get_session`, `mem_stats`), доступные в любом MCP-совместимом клиенте.
+- MCP-инструменты (`mem_search`, `mem_probe`, `mem_get_turn`, `mem_get_session`, `mem_stats`), доступные в любом MCP-совместимом клиенте. `mem_probe(term)` — точный FTS-счётчик (coverage-oracle: сколько, где, когда); `mem_search` — ранжирующий поиск с нечёткими совпадениями.
 - Инкрементальный sync новых сессий и ежедневные бэкапы через systemd user-таймеры.
 - Команда `anamnesis restore` для отката и переезда на другую машину.
 
