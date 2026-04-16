@@ -26,6 +26,19 @@ sys.modules.setdefault("mcp.server.fastmcp", fastmcp_module)
 from anamnesis.daemon import mcp_server
 
 
+_audit_log: list[tuple] = []
+
+
+def _fake_write_audit(action, status, duration_sec, details):
+    _audit_log.append((action, status, dict(details)))
+
+
+# Silence real audit writes during tests, capture calls for inspection.
+import anamnesis.audit as _audit_mod  # noqa: E402
+
+_audit_mod.write_audit = _fake_write_audit
+
+
 class _FakeConn:
     def __init__(self):
         self.closed = False
@@ -93,6 +106,49 @@ class MCPPServerTests(unittest.TestCase):
         self.assertEqual(result["hits"], [])
         self.assertNotIn("error", result)
         self.assertTrue(conn.closed)
+
+
+class AuditTelemetryTests(unittest.TestCase):
+    def setUp(self):
+        _audit_log.clear()
+
+    def test_successful_mem_search_records_ok_with_query_and_turn_ids(self):
+        conn = _FakeConn()
+        fake_hit = type(
+            "H",
+            (),
+            {
+                "turn_id": 123,
+                "text": "x",
+                "meta": {},
+                "bm25_rank": 1,
+                "sem_rank": None,
+                "rrf_score": 0.0,
+            },
+        )()
+        with (
+            patch.object(mcp_server, "connect", return_value=conn),
+            patch.object(mcp_server, "_bm25", return_value=[fake_hit]),
+        ):
+            mcp_server.mem_search("hello", mode="bm25")
+
+        self.assertEqual(len(_audit_log), 1)
+        action, status, details = _audit_log[0]
+        self.assertEqual(action, "mcp.mem_search")
+        self.assertEqual(status, "ok")
+        self.assertEqual(details["query"], "hello")
+        self.assertEqual(details["total"], 1)
+        self.assertEqual(details["returned_turn_ids"], [123])
+
+    def test_errored_mem_search_records_error_status(self):
+        conn = _FakeConn()
+        with patch.object(mcp_server, "connect", return_value=conn):
+            mcp_server.mem_search("x", mode="nope")
+
+        self.assertEqual(len(_audit_log), 1)
+        action, status, _ = _audit_log[0]
+        self.assertEqual(action, "mcp.mem_search")
+        self.assertEqual(status, "error")
 
 
 if __name__ == "__main__":

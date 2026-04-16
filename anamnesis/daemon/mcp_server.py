@@ -8,6 +8,12 @@ Tools:
   - mem_get_turn(turn_id, context=2) → full turn + N surrounding turns
   - mem_get_session(session_id, max_turns=50) → session overview
   - mem_stats() → corpus statistics
+  - mem_audit_tail(limit=20, action=None) → recent telemetry (for introspection)
+
+Every tool call is recorded in anamnesis_audit as `action='mcp.<tool>'` with
+a JSON `details` payload. Correlating mem_search and subsequent mem_get_turn
+calls by timestamp proximity gives a passive relevance signal (which hits
+the agent actually read) without any explicit feedback loop.
 
 Run standalone for smoke test:
   python -m anamnesis.daemon.mcp_server
@@ -25,12 +31,14 @@ Claude Code config (add to ~/.claude.json or via `claude mcp add`):
 """
 from __future__ import annotations
 
+import functools
 import sqlite3
 import sys
-from typing import Any
+from typing import Any, Callable
 
 from mcp.server.fastmcp import FastMCP
 
+from anamnesis.audit import audited, recent as recent_audit
 from anamnesis.config import local_embed_model_ready
 from anamnesis.db import connect
 from anamnesis.search.hybrid import (
@@ -62,6 +70,78 @@ def _init():
 
 
 mcp = FastMCP("anamnesis")
+
+
+def _audited_tool(
+    action: str,
+    summarize: Callable[[tuple, dict, Any], dict] | None = None,
+):
+    """Decorator: wrap an MCP tool so every call lands in anamnesis_audit.
+
+    `summarize(args, kwargs, result)` returns a JSON-safe dict of interesting
+    fields for the `details` payload. It is called inside the audited context
+    so its exceptions are swallowed (telemetry must never break a tool call).
+
+    Status is 'error' if the returned dict has an 'error' key, else 'ok'.
+    Duration is recorded by the `audited` context manager.
+    """
+
+    def wrap(fn):
+        @functools.wraps(fn)
+        def inner(*args, **kwargs):
+            with audited(f"mcp.{action}") as details:
+                result = fn(*args, **kwargs)
+                try:
+                    if summarize is not None:
+                        details.update(summarize(args, kwargs, result) or {})
+                except Exception:
+                    pass
+                if isinstance(result, dict) and "error" in result:
+                    details["_status"] = "error"
+                return result
+
+        return inner
+
+    return wrap
+
+
+def _summarize_mem_search(args, kwargs, result):
+    return {
+        "query": (kwargs.get("query") or (args[0] if args else ""))[:200],
+        "mode": result.get("mode") if isinstance(result, dict) else None,
+        "total": result.get("total") if isinstance(result, dict) else None,
+        "returned_turn_ids": [h.get("turn_id") for h in (result.get("hits") or [])][:10],
+    }
+
+
+def _summarize_mem_probe(args, kwargs, result):
+    return {
+        "term": (kwargs.get("term") or (args[0] if args else ""))[:200],
+        "total_matches": result.get("total_matches") if isinstance(result, dict) else None,
+        "n_top_sessions": len(result.get("top_sessions") or []) if isinstance(result, dict) else 0,
+    }
+
+
+def _summarize_mem_get_turn(args, kwargs, result):
+    turn_id = kwargs.get("turn_id") or (args[0] if args else None)
+    return {
+        "turn_id": turn_id,
+        "session": result.get("session") if isinstance(result, dict) else None,
+        "found": isinstance(result, dict) and "error" not in result,
+    }
+
+
+def _summarize_mem_get_session(args, kwargs, result):
+    return {
+        "session": kwargs.get("session_id") or (args[0] if args else None),
+        "total_turns": result.get("total_turns") if isinstance(result, dict) else None,
+        "found": isinstance(result, dict) and "error" not in result,
+    }
+
+
+def _summarize_mem_stats(args, kwargs, result):
+    totals = result.get("totals") if isinstance(result, dict) else {}
+    return {"sessions": totals.get("sessions"), "turns": totals.get("turns")}
 
 
 def _corpus_coverage(conn) -> dict[str, Any]:
@@ -132,6 +212,7 @@ def _fts_syntax_hint() -> str:
 
 
 @mcp.tool()
+@_audited_tool("mem_search", summarize=_summarize_mem_search)
 def mem_search(
     query: str,
     top_k: int = 10,
@@ -222,6 +303,7 @@ def mem_search(
 
 
 @mcp.tool()
+@_audited_tool("mem_get_turn", summarize=_summarize_mem_get_turn)
 def mem_get_turn(turn_id: int, context: int = 2) -> dict[str, Any]:
     """Fetch a specific turn with N surrounding turns from the same session.
 
@@ -280,6 +362,7 @@ def mem_get_turn(turn_id: int, context: int = 2) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_audited_tool("mem_get_session", summarize=_summarize_mem_get_session)
 def mem_get_session(session_id: str, max_turns: int = 50) -> dict[str, Any]:
     """Get overview of a session: metadata + first N turns."""
     conn = connect()
@@ -339,6 +422,7 @@ def _fts_phrase(term: str) -> str:
 
 
 @mcp.tool()
+@_audited_tool("mem_probe", summarize=_summarize_mem_probe)
 def mem_probe(term: str, top_sessions: int = 3) -> dict[str, Any]:
     """Coverage oracle: does this exact token appear in the corpus, where, when.
 
@@ -479,6 +563,7 @@ def mem_probe(term: str, top_sessions: int = 3) -> dict[str, Any]:
 
 
 @mcp.tool()
+@_audited_tool("mem_stats", summarize=_summarize_mem_stats)
 def mem_stats() -> dict[str, Any]:
     """Corpus statistics: totals and per-source/per-project breakdowns."""
     conn = connect()
@@ -515,6 +600,28 @@ def mem_stats() -> dict[str, Any]:
         "turns_by_role": by_role,
         "top_projects": top_projects,
     }
+
+
+@mcp.tool()
+def mem_audit_tail(limit: int = 20, action: str | None = None) -> dict[str, Any]:
+    """Return the last N audit records — telemetry of MCP tool calls and
+    background jobs (sync, verify, backup).
+
+    Args:
+        limit: number of records (1..200).
+        action: optional filter, e.g. 'mcp.mem_search' or 'sync'. None = all.
+
+    Use this to:
+      - introspect recent search activity (what was queried, how many hits),
+      - correlate mem_search calls with subsequent mem_get_turn fetches
+        (passive relevance signal: which hits the agent actually read),
+      - verify sync/verify/backup ran successfully.
+    """
+    limit = max(1, min(limit, 200))
+    rows = recent_audit(limit=limit if action is None else limit * 3)
+    if action:
+        rows = [r for r in rows if r["action"] == action][:limit]
+    return {"count": len(rows), "records": rows}
 
 
 if __name__ == "__main__":
