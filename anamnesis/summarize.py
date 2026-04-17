@@ -30,6 +30,8 @@ def summarize_session(conn, content_session_id: str) -> dict | None:
         return None
 
     memory_id = sess["memory_session_id"]
+    if not memory_id:
+        return None
     project = sess["project"] or ""
 
     # Fetch all turns ordered by turn_number
@@ -98,26 +100,34 @@ def summarize_session(conn, content_session_id: str) -> dict | None:
     now_iso = now.isoformat()
     now_epoch = int(now.timestamp())
 
-    # Upsert into session_summaries
-    conn.execute(
-        """INSERT INTO session_summaries
-             (memory_session_id, content_session_id, project, request,
-              investigated, learned, completed, files_read,
-              summary_text, prompt_number, discovery_tokens,
-              created_at, created_at_epoch)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
-           ON CONFLICT(memory_session_id, prompt_number) DO UPDATE SET
-             summary_text = excluded.summary_text,
-             content_session_id = excluded.content_session_id,
-             investigated = excluded.investigated,
-             learned = excluded.learned,
-             completed = excluded.completed,
-             files_read = excluded.files_read
-        """,
-        (memory_id, content_session_id, project, request,
-         investigated, learned, completed, files_str,
-         summary_text, now_iso, now_epoch),
-    )
+    # Check if summary already exists for this session
+    existing = conn.execute(
+        "SELECT id FROM session_summaries WHERE memory_session_id = ? AND prompt_number = 1",
+        (memory_id,),
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            """UPDATE session_summaries SET
+                 summary_text = ?, content_session_id = ?,
+                 investigated = ?, learned = ?, completed = ?, files_read = ?
+               WHERE id = ?""",
+            (summary_text, content_session_id,
+             investigated, learned, completed, files_str,
+             existing["id"]),
+        )
+    else:
+        conn.execute(
+            """INSERT INTO session_summaries
+                 (memory_session_id, content_session_id, project, request,
+                  investigated, learned, completed, files_read,
+                  summary_text, prompt_number,
+                  created_at, created_at_epoch)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+            (memory_id, content_session_id, project, request,
+             investigated, learned, completed, files_str,
+             summary_text, now_iso, now_epoch),
+        )
 
     # Mark as summarized
     conn.execute(
@@ -140,6 +150,9 @@ def backfill(limit: int | None = None) -> dict:
     query = """
         SELECT s.content_session_id
         FROM sdk_sessions s
+        JOIN (SELECT content_session_id, COUNT(*) AS cnt
+              FROM historical_turns GROUP BY content_session_id HAVING cnt >= 2) t
+            ON t.content_session_id = s.content_session_id
         LEFT JOIN anamnesis_summary_state ss
             ON ss.content_session_id = s.content_session_id
         WHERE ss.content_session_id IS NULL

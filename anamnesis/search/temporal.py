@@ -21,7 +21,7 @@ def _now() -> datetime:
 
 
 def _days_ago(n: int) -> datetime:
-    return _now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=n - 1 if n > 0 else 0)
+    return _now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=n)
 
 
 def _start_of_day(d: datetime) -> datetime:
@@ -85,7 +85,7 @@ def _month_range_ru(month_name: str) -> tuple[datetime, datetime] | None:
 # ---------------------------------------------------------------------------
 
 def _resolve_yesterday(_m=None):
-    d = _days_ago(1)
+    d = _now() - timedelta(days=1)
     return _start_of_day(d), _end_of_day(d)
 
 def _resolve_today(_m=None):
@@ -110,7 +110,7 @@ def _resolve_last_month(_m=None):
 def _resolve_n_days_ago(m):
     n = int(m.group(1))
     d = _now() - timedelta(days=n)
-    return _start_of_day(d), _end_of_day(d)
+    return _start_of_day(d), _end_of_day(_now() - timedelta(days=n))
 
 def _resolve_en_month(m):
     return _month_range(m.group(1))

@@ -29,8 +29,8 @@ def score(text: str, role: str = "assistant") -> float:
 
     length = len(text)
 
-    # Very short trivial turns — low importance
-    if length < 50:
+    # Very short trivial turns — low importance (but not user questions)
+    if length < 50 and not (role == "user" and "?" in text):
         return 0.1
 
     s = 0.0
