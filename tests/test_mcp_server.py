@@ -124,6 +124,10 @@ class AuditTelemetryTests(unittest.TestCase):
                 "bm25_rank": 1,
                 "sem_rank": None,
                 "rrf_score": 0.0,
+                "rerank_score": None,
+                "temporal_rank": None,
+                "graph_rank": None,
+                "hit_type": "turn",
             },
         )()
         with (
