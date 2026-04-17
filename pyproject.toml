@@ -3,22 +3,34 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "anamnesis"
+name = "anamnesis-ai"
 dynamic = ["version"]
-description = "Персистентная память для AI CLI сессий — гибридный поиск по истории разговоров"
-readme = "SETUP.md"
+description = "Persistent hybrid-search memory for AI CLI sessions (Claude Code, Codex, any turn-based jsonl)"
+readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Proprietary"}
+license = "MIT"
+keywords = ["memory", "search", "mcp", "claude", "codex", "rag", "hybrid-search"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
 authors = [
     {name = "xomyachok-shaolin"},
 ]
-
 dependencies = [
     "chromadb>=0.4",
     "fastembed>=0.6",
     "mcp>=1.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/xomyachok-shaolin/anamnesis"
+Repository = "https://github.com/xomyachok-shaolin/anamnesis"
+Issues = "https://github.com/xomyachok-shaolin/anamnesis/issues"
 
 [project.optional-dependencies]
 dev = [

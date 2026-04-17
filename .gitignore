@@ -17,3 +17,6 @@ config/codex.sqlite3
 config/hypercorn.toml
 config/logs/
 config/secret_key
+build/
+dist/
+*.egg-info/
