@@ -289,6 +289,9 @@ def mem_search(
             "rrf_score": round(h.rrf_score, 4) if h.rrf_score else None,
             "bm25_rank": h.bm25_rank,
             "sem_rank": h.sem_rank,
+            "rerank_score": round(h.rerank_score, 4) if h.rerank_score is not None else None,
+            "temporal_rank": h.temporal_rank,
+            "graph_rank": getattr(h, "graph_rank", None),
             "turn_id": h.turn_id,
             "session": h.meta.get("session", ""),
             "turn": h.meta.get("turn"),
@@ -298,6 +301,7 @@ def mem_search(
             "title": h.meta.get("title", ""),
             "project": h.meta.get("project", ""),
             "snippet": (h.text or "")[:400],
+            "hit_type": getattr(h, "hit_type", "turn"),
         })
     resp: dict[str, Any] = {"query": query, "mode": mode, "total": len(out), "hits": out}
     if coverage is not None:

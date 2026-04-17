@@ -63,25 +63,38 @@ def cmd_sync(args):
 
     from anamnesis.entities import backfill as entity_backfill
     from anamnesis.threading import compute as thread_compute
+    from anamnesis.importance import backfill as importance_backfill
+    from anamnesis.summarize import backfill as summarize_backfill
+    from anamnesis.graph import build_edges as graph_build_edges
 
     with audited("sync") as details:
         ing = ingest(verbose=args.verbose)
         emb = embed(verbose=args.verbose, batch_size=args.batch)
         ent = entity_backfill()
         thr = thread_compute()
+        imp = importance_backfill()
+        smr = summarize_backfill()
+        grp = graph_build_edges()
         _wal_checkpoint()
         details.update({
             "ingest": ing,
             "embed": emb,
             "entities": ent,
             "threads": thr,
+            "importance": imp,
+            "summaries": smr,
+            "graph": grp,
             "_status": "ok" if ing["errors"] == 0 and "error" not in emb else "warn",
         })
 
+    sync_result = {
+        "ingest": ing, "embed": emb, "entities": ent, "threads": thr,
+        "importance": imp, "summaries": smr, "graph": grp,
+    }
     snapshot = _compute_status()
-    snapshot["last_sync"] = {"ingest": ing, "embed": emb, "entities": ent, "threads": thr}
+    snapshot["last_sync"] = sync_result
     write_health(snapshot)
-    print(json.dumps({"ingest": ing, "embed": emb, "entities": ent, "threads": thr}, ensure_ascii=False))
+    print(json.dumps(sync_result, ensure_ascii=False))
 
 
 def cmd_status(args):
@@ -192,6 +205,21 @@ def cmd_threads(args):
     print(json.dumps({"compute": r, "stats": s}, indent=2, ensure_ascii=False))
 
 
+def cmd_archive(args):
+    from anamnesis.db import connect, run_migrations
+    from anamnesis.decay import archive_old_turns
+    from anamnesis.config import ARCHIVE_AGE_DAYS
+
+    run_migrations()
+    conn = connect()
+    result = archive_old_turns(
+        conn, age_days=args.age or ARCHIVE_AGE_DAYS,
+        importance_threshold=args.threshold,
+    )
+    conn.close()
+    print(json.dumps(result, ensure_ascii=False))
+
+
 def cmd_eval(args):
     from anamnesis.eval.run import evaluate, load_golden
     from pathlib import Path
@@ -254,6 +282,11 @@ def build_parser():
 
     th = sub.add_parser("threads", help="recompute session continuation threads")
     th.set_defaults(func=cmd_threads)
+
+    ar = sub.add_parser("archive", help="archive old low-importance turns (opt-in)")
+    ar.add_argument("--age", type=int, default=None, help="min age in days (default: ARCHIVE_AGE_DAYS)")
+    ar.add_argument("--threshold", type=float, default=0.3, help="importance threshold")
+    ar.set_defaults(func=cmd_archive)
 
     e = sub.add_parser("eval", help="run golden eval")
     e.add_argument("--mode", choices=["semantic", "hybrid"], default="hybrid")

@@ -98,6 +98,10 @@ class Hit:
     bm25_rank: int | None = None
     sem_rank: int | None = None
     rrf_score: float = 0.0
+    rerank_score: float | None = None
+    temporal_rank: int | None = None
+    hit_type: str = "turn"  # "turn" or "summary"
+    graph_rank: int | None = None
 
 
 def _run_bm25_query(conn, fts_expr: str, k: int):
@@ -195,6 +199,52 @@ def _semantic(emb, col, q: str, k: int, role: str | None = None) -> list[Hit]:
     return hits
 
 
+def _bm25_summaries(conn, q: str, k: int) -> list[Hit]:
+    """BM25 search over session_summaries_fts."""
+    fts_expr = _fts_query(q)
+    if not fts_expr:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT ss.id, ss.summary_text, ss.content_session_id,
+                   ss.project, ss.memory_session_id,
+                   ss.created_at,
+                   bm25(session_summaries_fts) AS score
+            FROM session_summaries_fts
+            JOIN session_summaries ss ON ss.id = session_summaries_fts.rowid
+            WHERE session_summaries_fts MATCH ?
+            ORDER BY score ASC
+            LIMIT ?
+            """,
+            (fts_expr, k),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    hits = []
+    for rank, row in enumerate(rows, 1):
+        # Use negative ID to distinguish from turn IDs
+        hits.append(
+            Hit(
+                turn_id=-row["id"],
+                text=row["summary_text"] or "",
+                meta={
+                    "session": row["content_session_id"] or "",
+                    "turn": 0,
+                    "role": "summary",
+                    "timestamp": row["created_at"] or "",
+                    "source": "summary",
+                    "title": "",
+                    "project": row["project"] or "",
+                },
+                bm25_rank=rank,
+                hit_type="summary",
+            )
+        )
+    return hits
+
+
 def search(
     conn,
     query: str,
@@ -205,7 +255,11 @@ def search(
     sem_weight: float = 1.0,
 ) -> list[Hit]:
     """Hybrid search. Returns fused top-k Hits."""
+    from anamnesis.config import TEMPORAL_WEIGHT
+
     bm25_hits = _bm25(conn, query, pool)
+    # Also search session summaries (observation layer)
+    bm25_hits.extend(_bm25_summaries(conn, query, pool // 5))
     if local_embed_model_ready():
         try:
             emb = _embedder()
@@ -215,6 +269,26 @@ def search(
             sem_hits = []
     else:
         sem_hits = []
+
+    # Temporal channel — only fires when query has time expressions
+    from anamnesis.search.temporal import detect_time_range, temporal_search
+
+    time_range = detect_time_range(query)
+    temp_hits = temporal_search(conn, time_range, pool) if time_range else []
+
+    # Graph channel — entity co-occurrence traversal
+    from anamnesis.config import GRAPH_WEIGHT, GRAPH_MAX_HOPS
+    from anamnesis.entities import extract as extract_entities
+
+    graph_hits: list[Hit] = []
+    if GRAPH_WEIGHT > 0:
+        query_entities = [val for _, val in extract_entities(query)]
+        if query_entities:
+            from anamnesis.graph import graph_search
+            try:
+                graph_hits = graph_search(conn, query_entities, max_hops=GRAPH_MAX_HOPS, k=pool)
+            except Exception:
+                graph_hits = []
 
     by_id: dict[int, Hit] = {}
     for h in bm25_hits:
@@ -228,9 +302,60 @@ def search(
         else:
             h.rrf_score = sem_weight / (RRF_K + h.sem_rank)
             by_id[h.turn_id] = h
+    for h in temp_hits:
+        if h.turn_id in by_id:
+            existing = by_id[h.turn_id]
+            existing.temporal_rank = h.temporal_rank
+            existing.rrf_score += TEMPORAL_WEIGHT / (RRF_K + h.temporal_rank)
+        else:
+            h.rrf_score = TEMPORAL_WEIGHT / (RRF_K + h.temporal_rank)
+            by_id[h.turn_id] = h
+    for h in graph_hits:
+        if h.turn_id in by_id:
+            existing = by_id[h.turn_id]
+            existing.graph_rank = h.graph_rank
+            existing.rrf_score += GRAPH_WEIGHT / (RRF_K + h.graph_rank)
+        else:
+            h.rrf_score = GRAPH_WEIGHT / (RRF_K + h.graph_rank)
+            by_id[h.turn_id] = h
+
+    # Apply importance weighting
+    from anamnesis.config import IMPORTANCE_WEIGHT
+
+    if IMPORTANCE_WEIGHT > 0 and by_id:
+        turn_ids = [tid for tid in by_id if tid > 0]  # skip summary hits (negative IDs)
+        placeholders = ",".join("?" * len(turn_ids)) if turn_ids else "0"
+        imp_rows = conn.execute(
+            f"SELECT id, COALESCE(importance, 0.5) FROM historical_turns WHERE id IN ({placeholders})",
+            turn_ids,
+        ).fetchall()
+        imp_map = {r[0]: r[1] for r in imp_rows}
+        for h in by_id.values():
+            imp = imp_map.get(h.turn_id, 0.5)
+            h.rrf_score *= 1.0 + IMPORTANCE_WEIGHT * (imp - 0.5)
+
+    # Apply temporal decay — recent results rank higher
+    from anamnesis.config import DECAY_ENABLED, DECAY_HALF_LIFE_DAYS
+
+    if DECAY_ENABLED and by_id:
+        from anamnesis.decay import decay_factor
+        for h in by_id.values():
+            ts = h.meta.get("timestamp", "")
+            df = decay_factor(ts, DECAY_HALF_LIFE_DAYS)
+            h.rrf_score *= 0.5 + 0.5 * df  # floor at 50% of original score
 
     fused = sorted(by_id.values(), key=lambda h: h.rrf_score, reverse=True)
-    return fused[:top_k]
+
+    # Cross-encoder reranking (final precision step)
+    from anamnesis.config import RERANK_ENABLED, RERANK_TOP_N
+
+    if RERANK_ENABLED and len(fused) > top_k:
+        from anamnesis.search.rerank import rerank
+        fused = rerank(query, fused[:RERANK_TOP_N], top_k)
+    else:
+        fused = fused[:top_k]
+
+    return fused
 
 
 def format_hit(h: Hit) -> str:
@@ -244,6 +369,12 @@ def format_hit(h: Hit) -> str:
         ranks.append(f"B{h.bm25_rank}")
     if h.sem_rank:
         ranks.append(f"S{h.sem_rank}")
+    if h.temporal_rank:
+        ranks.append(f"T{h.temporal_rank}")
+    if h.graph_rank:
+        ranks.append(f"G{h.graph_rank}")
+    if h.rerank_score is not None:
+        ranks.append(f"R{h.rerank_score:.2f}")
     return (
         f"[rrf={h.rrf_score:.4f} {'+'.join(ranks) or '-'}] "
         f"{ts} [{role}/{src}] {title}\n"

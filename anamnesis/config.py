@@ -53,6 +53,30 @@ RRF_K = 60
 DEFAULT_TOP_K = 10
 DEFAULT_POOL = 50
 
+# --- Importance scoring ---
+IMPORTANCE_WEIGHT = float(os.environ.get("ANAMNESIS_IMPORTANCE_WEIGHT", "0.3"))
+
+# --- Cross-encoder reranking ---
+RERANK_ENABLED = os.environ.get("ANAMNESIS_RERANK", "1") == "1"
+RERANK_MODEL = os.environ.get(
+    "ANAMNESIS_RERANK_MODEL",
+    "Xenova/ms-marco-MiniLM-L-6-v2",
+)
+RERANK_TOP_N = int(os.environ.get("ANAMNESIS_RERANK_TOP_N", "20"))
+
+# --- Temporal retrieval ---
+TEMPORAL_WEIGHT = float(os.environ.get("ANAMNESIS_TEMPORAL_WEIGHT", "1.0"))
+
+# --- Decay / consolidation ---
+DECAY_ENABLED = os.environ.get("ANAMNESIS_DECAY", "1") == "1"
+DECAY_HALF_LIFE_DAYS = int(os.environ.get("ANAMNESIS_DECAY_HALF_LIFE", "90"))
+ARCHIVE_ENABLED = os.environ.get("ANAMNESIS_ARCHIVE", "0") == "1"
+ARCHIVE_AGE_DAYS = int(os.environ.get("ANAMNESIS_ARCHIVE_AGE", "365"))
+
+# --- Entity graph ---
+GRAPH_WEIGHT = float(os.environ.get("ANAMNESIS_GRAPH_WEIGHT", "0.5"))
+GRAPH_MAX_HOPS = int(os.environ.get("ANAMNESIS_GRAPH_MAX_HOPS", "2"))
+
 # --- Paths convenience ---
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MIGRATIONS_DIR = REPO_ROOT / "migrations"

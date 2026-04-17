@@ -116,16 +116,19 @@ def _upsert_session(cur, meta):
         )
 
     # historical_turns — rely on UNIQUE (session, turn_number) to avoid dupes
+    from anamnesis.importance import score as importance_score
+
     for i, (role, text, ts) in enumerate(meta["turns"], 1):
+        imp = importance_score(text[:20000], role)
         cur.execute(
             """
             INSERT INTO historical_turns
               (content_session_id, turn_number, role, text, timestamp,
-               platform_source)
-            VALUES (?, ?, ?, ?, ?, ?)
+               platform_source, importance)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(content_session_id, turn_number) DO NOTHING
             """,
-            (sid, i, role, text[:20000], ts or started, meta["platform"]),
+            (sid, i, role, text[:20000], ts or started, meta["platform"], imp),
         )
 
     return memory_id, len(meta["turns"])
