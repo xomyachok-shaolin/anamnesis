@@ -59,6 +59,29 @@ _EMB = None
 _COL = None
 
 
+def _auto_sync():
+    """Lightweight incremental sync: ingest new files + embed new turns.
+
+    Runs at MCP startup so data is fresh without waiting for the cron timer.
+    Skips heavier enrichment (entities, threads, importance, summaries, graph)
+    which run via `anamnesis sync` on a schedule.
+    """
+    try:
+        from anamnesis.db import run_migrations
+        from anamnesis.ingest.incremental import run as ingest
+        from anamnesis.indexers.incremental_chroma import run as embed
+
+        run_migrations()
+        ing = ingest(verbose=False)
+        emb = embed(verbose=False, batch_size=64)
+        total_new = ing.get("new", 0) + ing.get("updated", 0)
+        if total_new > 0:
+            print(f"[anamnesis] auto-sync: ingested {total_new} new turns, "
+                  f"embedded {emb.get('embedded', 0)}", file=sys.stderr)
+    except Exception as exc:
+        print(f"[anamnesis] auto-sync failed (non-fatal): {exc}", file=sys.stderr)
+
+
 def _init():
     global _EMB, _COL
     if _EMB is None:
@@ -71,6 +94,9 @@ def _init():
         list(_EMB.embed(["warmup"]))
         print("[anamnesis] ready", file=sys.stderr)
 
+
+# Run lightweight sync at process start so data is fresh for all modes.
+_auto_sync()
 
 mcp = FastMCP("anamnesis")
 
@@ -306,6 +332,9 @@ def mem_search(
     resp: dict[str, Any] = {"query": query, "mode": mode, "total": len(out), "hits": out}
     if coverage is not None:
         resp["searched"] = coverage
+    # Attach per-channel diagnostics when available (hybrid mode)
+    if hasattr(hits, "diagnostics") and hits.diagnostics is not None:
+        resp["diagnostics"] = hits.diagnostics.to_dict()
     return resp
 
 

@@ -104,6 +104,36 @@ class Hit:
     graph_rank: int | None = None
 
 
+@dataclass
+class SearchDiagnostics:
+    """Per-channel statistics from a search run."""
+    bm25_hits: int = 0
+    semantic_hits: int = 0
+    temporal_hits: int = 0
+    graph_hits: int = 0
+    summary_hits: int = 0
+    fused_total: int = 0
+    reranked: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "channels": {
+                "bm25": self.bm25_hits,
+                "semantic": self.semantic_hits,
+                "temporal": self.temporal_hits,
+                "graph": self.graph_hits,
+                "summaries": self.summary_hits,
+            },
+            "fused_total": self.fused_total,
+            "reranked": self.reranked,
+        }
+
+
+class SearchResult(list):
+    """List of Hits with optional diagnostics. Behaves as a plain list."""
+    diagnostics: SearchDiagnostics | None = None
+
+
 def _run_bm25_query(conn, fts_expr: str, k: int):
     return conn.execute(
         """
@@ -253,13 +283,22 @@ def search(
     role: str | None = None,
     bm25_weight: float = 1.0,
     sem_weight: float = 1.0,
-) -> list[Hit]:
-    """Hybrid search. Returns fused top-k Hits."""
+) -> tuple[list[Hit], SearchDiagnostics] | list[Hit]:
+    """Hybrid search. Returns fused top-k Hits and diagnostics.
+
+    Returns (hits, diagnostics) tuple. For backwards compatibility,
+    callers that unpack as a list still work — use search_with_diagnostics()
+    to get the tuple explicitly.
+    """
     from anamnesis.config import TEMPORAL_WEIGHT
 
+    diag = SearchDiagnostics()
+
     bm25_hits = _bm25(conn, query, pool)
-    # Also search session summaries (observation layer)
-    bm25_hits.extend(_bm25_summaries(conn, query, pool // 5))
+    summary_hits_list = _bm25_summaries(conn, query, pool // 5)
+    diag.bm25_hits = len(bm25_hits)
+    diag.summary_hits = len(summary_hits_list)
+    bm25_hits.extend(summary_hits_list)
     if local_embed_model_ready():
         try:
             emb = _embedder()
@@ -269,12 +308,14 @@ def search(
             sem_hits = []
     else:
         sem_hits = []
+    diag.semantic_hits = len(sem_hits)
 
     # Temporal channel — only fires when query has time expressions
     from anamnesis.search.temporal import detect_time_range, temporal_search
 
     time_range = detect_time_range(query)
     temp_hits = temporal_search(conn, time_range, pool) if time_range else []
+    diag.temporal_hits = len(temp_hits)
 
     # Graph channel — entity co-occurrence traversal
     from anamnesis.config import GRAPH_WEIGHT, GRAPH_MAX_HOPS
@@ -289,6 +330,7 @@ def search(
                 graph_hits = graph_search(conn, query_entities, max_hops=GRAPH_MAX_HOPS, k=pool)
             except Exception:
                 graph_hits = []
+    diag.graph_hits = len(graph_hits)
 
     by_id: dict[int, Hit] = {}
     for h in bm25_hits:
@@ -345,6 +387,7 @@ def search(
             h.rrf_score *= 0.5 + 0.5 * df  # floor at 50% of original score
 
     fused = sorted(by_id.values(), key=lambda h: h.rrf_score, reverse=True)
+    diag.fused_total = len(fused)
 
     # Cross-encoder reranking (final precision step)
     from anamnesis.config import RERANK_ENABLED, RERANK_TOP_N
@@ -352,10 +395,13 @@ def search(
     if RERANK_ENABLED and len(fused) > top_k:
         from anamnesis.search.rerank import rerank
         fused = rerank(query, fused[:RERANK_TOP_N], top_k)
+        diag.reranked = True
     else:
         fused = fused[:top_k]
 
-    return fused
+    result = SearchResult(fused)
+    result.diagnostics = diag
+    return result
 
 
 def format_hit(h: Hit) -> str:

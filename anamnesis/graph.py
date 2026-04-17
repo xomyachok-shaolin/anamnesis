@@ -3,16 +3,23 @@
 Builds edges between entities that appear in the same session.
 Graph retrieval traverses these edges (BFS) to find turns related to
 query entities, feeding results into RRF as an additional channel.
+
+Quality controls:
+  - MIN_EDGE_WEIGHT: edges below this threshold are ignored during traversal
+  - Entity frequency normalization: common entities (appearing in many edges)
+    get down-weighted so rare, discriminative entities rank higher
 """
 from __future__ import annotations
 
 import json
 import logging
+import math
 from itertools import combinations
 
 log = logging.getLogger(__name__)
 
 BATCH_SIZE = 500
+MIN_EDGE_WEIGHT = 2  # ignore single-occurrence co-occurrences (noise)
 
 
 def build_edges(limit: int | None = None) -> dict:
@@ -83,6 +90,30 @@ def build_edges(limit: int | None = None) -> dict:
     return {"sessions_processed": processed, "edges_added": edges_added}
 
 
+def _entity_degree(conn, entities: list[str]) -> dict[str, int]:
+    """Count how many edges each entity participates in (its degree)."""
+    if not entities:
+        return {}
+    placeholders = ",".join("?" * len(entities))
+    rows = conn.execute(
+        f"""
+        SELECT entity, SUM(cnt) AS degree FROM (
+            SELECT entity_a AS entity, COUNT(*) AS cnt
+            FROM anamnesis_entity_edges
+            WHERE entity_a IN ({placeholders})
+            GROUP BY entity_a
+            UNION ALL
+            SELECT entity_b AS entity, COUNT(*) AS cnt
+            FROM anamnesis_entity_edges
+            WHERE entity_b IN ({placeholders})
+            GROUP BY entity_b
+        ) GROUP BY entity
+        """,
+        (*entities, *entities),
+    ).fetchall()
+    return {r["entity"]: r["degree"] for r in rows}
+
+
 def graph_search(
     conn,
     query_entities: list[str],
@@ -92,6 +123,11 @@ def graph_search(
     """BFS traversal: find turns mentioning entities related to query entities.
 
     Returns Hit objects with graph_rank set.
+
+    Quality controls applied:
+      - Edges with weight < MIN_EDGE_WEIGHT are skipped (noise filtering)
+      - Related entities are scored as weight / log2(degree + 1) so that
+        rare, discriminative entities rank above ubiquitous ones
     """
     from anamnesis.search.hybrid import Hit
 
@@ -107,11 +143,13 @@ def graph_search(
         for entity in frontier:
             neighbors = conn.execute(
                 """SELECT entity_b AS neighbor, weight
-                   FROM anamnesis_entity_edges WHERE entity_a = ?
+                   FROM anamnesis_entity_edges
+                   WHERE entity_a = ? AND weight >= ?
                    UNION ALL
                    SELECT entity_a AS neighbor, weight
-                   FROM anamnesis_entity_edges WHERE entity_b = ?""",
-                (entity, entity),
+                   FROM anamnesis_entity_edges
+                   WHERE entity_b = ? AND weight >= ?""",
+                (entity, MIN_EDGE_WEIGHT, entity, MIN_EDGE_WEIGHT),
             ).fetchall()
             for n in neighbors:
                 nb = n["neighbor"]
@@ -124,9 +162,19 @@ def graph_search(
     if not related:
         return []
 
-    # Sort by weight desc, take top entities
-    related.sort(key=lambda x: (-x[2], x[1]))
-    top_entities = [r[0] for r in related[:30]]
+    # IDF-like normalization: down-weight entities with high degree (many connections)
+    entity_names = [r[0] for r in related]
+    degrees = _entity_degree(conn, entity_names)
+
+    scored = []
+    for entity, hop, weight in related:
+        degree = degrees.get(entity, 1)
+        # score = weight / log2(degree + 1) — high weight + low degree = discriminative
+        idf_score = weight / math.log2(degree + 1)
+        scored.append((entity, hop, idf_score))
+
+    scored.sort(key=lambda x: (-x[2], x[1]))
+    top_entities = [r[0] for r in scored[:30]]
 
     # Find turns mentioning these related entities
     placeholders = ",".join("?" * len(top_entities))

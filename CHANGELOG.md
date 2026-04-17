@@ -36,3 +36,12 @@
 - `anamnesis sync` теперь дополнительно выполняет importance backfill, генерацию саммари и построение рёбер графа.
 - Ответ `mem_search` MCP-инструмента включает поля `rerank_score`, `temporal_rank`, `graph_rank`, `hit_type`.
 - Поисковый пайплайн: 4 канала RRF → importance weighting → decay factor → cross-encoder rerank.
+- Entity graph: pruning рёбер с weight < 2 (шумоподавление), IDF-нормализация `weight / log2(degree + 1)` для подавления сущностей-хабов.
+- MCP-сервер: auto-sync (ingest + embed) при запуске процесса — данные актуальны без ожидания cron-таймера.
+- Ответ `mem_search` включает `diagnostics` с разбивкой хитов по каналам (bm25, semantic, temporal, graph, summaries).
+
+### Тесты
+
+- 16 интеграционных тестов RRF fusion pipeline: формула скора, multi-channel merge, importance weighting, temporal decay, graph channel, summary channel, merge-by-turn-id, diagnostics.
+- 2 новых unit-теста entity graph: pruning low-weight edges, IDF normalization.
+- Итого: 93 теста, все зелёные.

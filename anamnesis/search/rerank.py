@@ -52,9 +52,21 @@ def rerank(query: str, hits: list[Hit], top_k: int) -> list[Hit]:
         return hits[:top_k]
 
     reranked = []
-    for entry in results:
-        idx = entry.index if hasattr(entry, "index") else entry["index"]
-        sc = entry.score if hasattr(entry, "score") else entry["score"]
+    for i, entry in enumerate(results):
+        try:
+            if hasattr(entry, "index"):
+                idx, sc = entry.index, entry.score
+            elif isinstance(entry, dict):
+                idx, sc = entry["index"], entry["score"]
+            elif isinstance(entry, (int, float)):
+                # Some fastembed versions return raw scores; use enumeration order
+                idx, sc = i, float(entry)
+            else:
+                idx, sc = i, float(entry)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if idx >= len(hits):
+            continue
         h = hits[idx]
         h.rerank_score = sc
         reranked.append(h)
