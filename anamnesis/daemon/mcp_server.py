@@ -26,7 +26,7 @@ Claude Code config (add to ~/.claude.json or via `claude mcp add`):
       "anamnesis": {
         "command": "$HOME/.claude-mem/semantic-env/bin/python",
         "args": ["-m", "anamnesis.daemon.mcp_server"],
-        "env": {"PYTHONPATH": "$HOME/projects/anamnesis"}
+        "env": {"PYTHONPATH": "$HOME/projects/anamnestic"}
       }
     }
   }

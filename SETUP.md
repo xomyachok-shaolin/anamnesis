@@ -200,8 +200,8 @@ uv pip install --python ~/.claude-mem/semantic-env/bin/python \
 ## 5. Получить репо
 
 ```bash
-git clone <url> ~/projects/anamnesis
-cd ~/projects/anamnesis
+git clone <url> ~/projects/anamnestic
+cd ~/projects/anamnestic
 ```
 
 Проверка:
@@ -213,7 +213,7 @@ migrations/ # 001_fts_and_unique.sql, 002_incremental_state.sql, 003_audit_log.s
 systemd/    # *.service, *.timer
 ```
 
-Ниже все команды подразумевают `cd ~/projects/anamnesis && export PYTHONPATH=$PWD`.
+Ниже все команды подразумевают `cd ~/projects/anamnestic && export PYTHONPATH=$PWD`.
 
 ---
 
@@ -325,7 +325,7 @@ queries:
 
 ```bash
 claude mcp add anamnesis ~/.claude-mem/semantic-env/bin/python \
-    -e PYTHONPATH=$HOME/projects/anamnesis \
+    -e PYTHONPATH=$HOME/projects/anamnestic \
     -- -m anamnesis.daemon.mcp_server
 
 claude mcp list   # должно быть "anamnesis ... ✓ Connected"
@@ -341,7 +341,7 @@ cat >> ~/.codex/config.toml <<EOF
 [mcp_servers.anamnesis]
 command = "$HOME/.claude-mem/semantic-env/bin/python"
 args = ["-m", "anamnesis.daemon.mcp_server"]
-env = { PYTHONPATH = "$HOME/projects/anamnesis" }
+env = { PYTHONPATH = "$HOME/projects/anamnestic" }
 EOF
 ```
 
@@ -366,8 +366,8 @@ codex mcp get anamnesis       # детали
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp ~/projects/anamnesis/systemd/*.service \
-   ~/projects/anamnesis/systemd/*.timer \
+cp ~/projects/anamnestic/systemd/*.service \
+   ~/projects/anamnestic/systemd/*.timer \
    ~/.config/systemd/user/
 
 systemctl --user daemon-reload
@@ -402,7 +402,7 @@ journalctl --user -u anamnesis-sync.service -n 30
 Алиас:
 
 ```bash
-alias anamnesis='PYTHONPATH=$HOME/projects/anamnesis $HOME/.claude-mem/semantic-env/bin/python -m anamnesis.cli'
+alias anamnesis='PYTHONPATH=$HOME/projects/anamnestic $HOME/.claude-mem/semantic-env/bin/python -m anamnesis.cli'
 ```
 
 ```bash
@@ -434,7 +434,7 @@ anamnesis restore ~/anamnesis-backups/<tarball>.tar.gz
 
 ~/anamnesis-backups/              # tarball'ы (last N)
 
-~/projects/anamnesis/                # код (git)
+~/projects/anamnestic/                # код (git)
 ├─ anamnesis/
 │  ├─ config.py                    # пути / модель / коллекция (env-overridable)
 │  ├─ db.py                        # connect() + миграции
@@ -484,13 +484,13 @@ anamnesis restore ~/anamnesis-backups/<tarball>.tar.gz
 На старой (или из последнего бэкапа) нужно:
 
 - `~/anamnesis-backups/<latest>.tar.gz` — данные,
-- `~/projects/anamnesis/` — репо,
+- `~/projects/anamnestic/` — репо,
 - (опционально) `~/.codex/sessions/`, `~/.claude/projects/` — если хочешь иметь raw jsonl-ы.
 
 На новой — §§1–5, затем:
 
 ```bash
-cd ~/projects/anamnesis
+cd ~/projects/anamnestic
 PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m anamnesis.cli restore \
     ~/anamnesis-backups/<latest>.tar.gz
 
@@ -520,7 +520,7 @@ SELECT platform_source, COUNT(*) FROM historical_turns GROUP BY platform_source;
 Если для какого-то источника 0 или сильно меньше ожидаемого:
 
 ```bash
-cd ~/projects/anamnesis
+cd ~/projects/anamnestic
 PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m anamnesis.ingest.recover_main
 ```
 

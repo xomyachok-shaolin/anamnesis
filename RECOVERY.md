@@ -4,7 +4,7 @@
 
 - **Ежедневные бэкапы**: `~/anamnesis-backups/claude-mem-YYYYMMDD-HHMMSS.tar.gz`
   (keeps last 10, WAL-safe SQLite dump + Chroma snapshot).
-- **Репо**: `~/projects/anamnesis/` (git).
+- **Репо**: `~/projects/anamnestic/` (git).
 
 Tarball contains two members at the top level:
 
@@ -19,8 +19,8 @@ curl -fsSL https://bun.sh/install | bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 2. Склонировать репо
-git clone <url> ~/projects/anamnesis
-cd ~/projects/anamnesis
+git clone <url> ~/projects/anamnestic
+cd ~/projects/anamnestic
 
 # 3. Создать venv
 uv venv ~/.claude-mem/semantic-env --python 3.11
@@ -28,7 +28,7 @@ uv pip install --python ~/.claude-mem/semantic-env/bin/python \
     chromadb fastembed mcp pyyaml
 
 # 4. Восстановить данные из последнего tarball
-cd ~/projects/anamnesis
+cd ~/projects/anamnestic
 PYTHONPATH=$PWD ~/.claude-mem/semantic-env/bin/python -m anamnesis.cli restore \
     ~/anamnesis-backups/claude-mem-LATEST.tar.gz
 

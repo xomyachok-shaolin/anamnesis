@@ -10,9 +10,9 @@ class ExtractTests(unittest.TestCase):
         self.assertIn(("path", "/home/user/project/src/main.py"), entities)
 
     def test_extracts_home_relative_paths(self):
-        text = "Config at ~/projects/anamnesis/config.yaml ok"
+        text = "Config at ~/projects/anamnestic/config.yaml ok"
         entities = list(extract(text))
-        self.assertIn(("path", "~/projects/anamnesis/config.yaml"), entities)
+        self.assertIn(("path", "~/projects/anamnestic/config.yaml"), entities)
 
     def test_extracts_dot_relative_paths(self):
         text = "Run ./scripts/deploy.sh or ../lib/utils.py"
