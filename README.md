@@ -72,7 +72,7 @@ anamnestic archive    # архивация старых low-importance turns
 
 ## Установка
 
-Полная инструкция — установка, бэкфилл, регистрация MCP, systemd-таймеры, переезд — в **[SETUP.md](SETUP.md)**.
+Полная инструкция — установка, бэкфилл, регистрация MCP, systemd-таймеры, переезд — в **[SETUP.md](https://github.com/xomyachok-shaolin/anamnestic/blob/master/SETUP.md)**.
 
 ## Принципы дизайна
 
@@ -94,4 +94,4 @@ pytest tests/ -v   # <1с
 
 ## Лицензия
 
-[MIT](LICENSE)
+[MIT](https://github.com/xomyachok-shaolin/anamnestic/blob/master/LICENSE)
