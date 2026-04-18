@@ -18,7 +18,7 @@ pip install anamnestic
 
 ## Архитектура
 
-![Architecture](docs/architecture.svg)
+![Architecture](https://raw.githubusercontent.com/xomyachok-shaolin/anamnestic/master/docs/architecture.svg)
 
 ## Поисковый пайплайн
 
