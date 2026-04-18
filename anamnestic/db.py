@@ -76,19 +76,36 @@ def _table_exists(cur, name: str) -> bool:
     return row is not None
 
 
-def _should_skip_migration(cur, name: str) -> bool:
-    if name != "004_rename_to_anamnestic.sql":
-        return False
+def _column_exists(cur, table: str, column: str) -> bool:
+    cols = [r[1] for r in cur.execute(f"PRAGMA table_info({table})").fetchall()]
+    return column in cols
 
-    legacy_tables = ("ext_ingest_state", "ext_embed_state", "ext_audit")
-    renamed_tables = (
-        "anamnestic_ingest_state",
-        "anamnestic_embed_state",
-        "anamnestic_audit",
-    )
-    has_legacy = any(_table_exists(cur, table) for table in legacy_tables)
-    has_renamed = all(_table_exists(cur, table) for table in renamed_tables)
-    return not has_legacy and has_renamed
+
+def _should_skip_migration(cur, name: str) -> bool:
+    if name == "004_rename_to_anamnestic.sql":
+        legacy_tables = ("ext_ingest_state", "ext_embed_state", "ext_audit")
+        renamed_tables = (
+            "anamnestic_ingest_state",
+            "anamnestic_embed_state",
+            "anamnestic_audit",
+        )
+        has_legacy = any(_table_exists(cur, table) for table in legacy_tables)
+        has_renamed = all(_table_exists(cur, table) for table in renamed_tables)
+        return not has_legacy and has_renamed
+
+    if name == "009_importance_score.sql":
+        return _column_exists(cur, "historical_turns", "importance")
+
+    if name == "010_summary_indexing.sql":
+        return _table_exists(cur, "anamnestic_summary_state")
+
+    if name == "011_decay.sql":
+        return _column_exists(cur, "historical_turns", "archived")
+
+    if name == "012_entity_graph.sql":
+        return _table_exists(cur, "anamnestic_entity_edges")
+
+    return False
 
 
 def run_migrations():
