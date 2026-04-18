@@ -1,0 +1,84 @@
+digraph anamnestic {
+    rankdir=TB
+    bgcolor="transparent"
+    fontname="Helvetica"
+    node [fontname="Helvetica" fontsize=11 shape=box style="rounded,filled" fillcolor="#f8f9fa" color="#dee2e6"]
+    edge [fontname="Helvetica" fontsize=9 color="#6c757d"]
+
+    // --- Sources ---
+    subgraph cluster_sources {
+        label="Источники" labeljust=l fontsize=12 style="dashed,rounded" color="#adb5bd"
+        claude  [label="Claude Code\nmain + sub-агенты" fillcolor="#d4edda"]
+        codex   [label="Codex CLI"                     fillcolor="#d4edda"]
+        copilot [label="VS Code Copilot"               fillcolor="#d4edda"]
+    }
+
+    // --- Ingest ---
+    ingest [label="Ingest\nmtime-сканер\nпарсер под формат" shape=ellipse fillcolor="#fff3cd"]
+
+    claude  -> ingest [arrowhead=none]
+    codex   -> ingest [arrowhead=none]
+    copilot -> ingest [arrowhead=none]
+
+    // --- Storage ---
+    subgraph cluster_sqlite {
+        label="SQLite" labeljust=l fontsize=12 style="rounded" color="#6c757d"
+        ht [label="historical_turns\n+ FTS5"]
+        ss [label="session_summaries\n+ FTS5"]
+        en [label="anamnestic_entities"]
+        ee [label="anamnestic_entity_edges"]
+    }
+
+    subgraph cluster_chroma {
+        label="Chroma (persistent)" labeljust=l fontsize=12 style="rounded" color="#6c757d"
+        emb [label="ONNX-эмбеддинги\nMiniLM-L12-v2"]
+    }
+
+    ingest -> ht
+    ingest -> ss
+    ingest -> en
+    ingest -> ee
+    ht -> emb [label="инкрементальный\nэмбеддер" style=dashed]
+
+    // --- Search channels ---
+    subgraph cluster_rrf {
+        label="Reciprocal Rank Fusion (K=60)" labeljust=l fontsize=12
+        style="rounded,filled" fillcolor="#e8f4fd" color="#74b9ff"
+
+        bm25 [label="BM25"              fillcolor="#dfe6e9"]
+        sem  [label="Семантика"          fillcolor="#dfe6e9"]
+        temp [label="Темпоральный"       fillcolor="#dfe6e9"]
+        egraph [label="Граф сущностей"    fillcolor="#dfe6e9"]
+    }
+
+    ht  -> bm25 [label="FTS5"]
+    ss  -> bm25 [label="FTS5"]
+    emb -> sem  [label="cosine"]
+    ht  -> temp [label="timestamp\nrange"]
+    en  -> egraph [label="BFS"]
+    ee  -> egraph
+
+    // --- Post-fusion ---
+    postfusion [label="Importance weighting\nTemporal decay\nCross-encoder reranking" shape=ellipse fillcolor="#ffeaa7"]
+
+    bm25  -> postfusion [arrowhead=none]
+    sem   -> postfusion [arrowhead=none]
+    temp  -> postfusion [arrowhead=none]
+    egraph -> postfusion [arrowhead=none]
+
+    // --- MCP ---
+    mcp [label="stdio MCP-сервер" fillcolor="#a29bfe" fontcolor="white"]
+    postfusion -> mcp
+
+    // --- Clients ---
+    subgraph cluster_clients {
+        label="MCP-клиенты" labeljust=l fontsize=12 style="dashed,rounded" color="#adb5bd"
+        c1 [label="Claude Code" fillcolor="#dfe6e9"]
+        c2 [label="Codex"       fillcolor="#dfe6e9"]
+        c3 [label="Любой\nMCP-клиент" fillcolor="#dfe6e9"]
+    }
+
+    mcp -> c1
+    mcp -> c2
+    mcp -> c3
+}

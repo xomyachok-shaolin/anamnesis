@@ -18,53 +18,7 @@ pip install anamnestic
 
 ## Архитектура
 
-```mermaid
-flowchart TD
-    subgraph sources ["Источники"]
-        CC[Claude Code<br/>main + sub-агенты]
-        CX[Codex CLI]
-        VS[VS Code Copilot]
-    end
-
-    sources -->|mtime-сканер<br/>парсер под формат| SQLite
-
-    subgraph SQLite ["SQLite"]
-        HT[historical_turns + FTS5]
-        SS[session_summaries + FTS5]
-        EN[anamnestic_entities]
-        EE[anamnestic_entity_edges]
-    end
-
-    subgraph Chroma ["Chroma (persistent)"]
-        EMB[ONNX-эмбеддинги<br/>MiniLM-L12-v2]
-    end
-
-    SQLite -->|инкрементальный<br/>эмбеддер| Chroma
-
-    HT --> BM25[BM25]
-    SS --> BM25
-    EN --> GRAPH[Граф сущностей]
-    EE --> GRAPH
-    EMB --> SEM[Семантика]
-    SQLite --> TEMP[Темпоральный]
-
-    subgraph RRF ["Reciprocal Rank Fusion (K=60)"]
-        BM25
-        SEM
-        TEMP
-        GRAPH
-    end
-
-    RRF -->|importance weighting<br/>temporal decay<br/>cross-encoder reranking| MCP
-
-    MCP[stdio MCP-сервер] --> clients
-
-    subgraph clients ["MCP-клиенты"]
-        C1[Claude Code]
-        C2[Codex]
-        C3[Любой MCP-клиент]
-    end
-```
+![Architecture](docs/architecture.svg)
 
 ## Поисковый пайплайн
 
