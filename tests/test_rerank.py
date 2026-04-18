@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 from dataclasses import dataclass
 
-from anamnesis.search.hybrid import Hit
-from anamnesis.search.rerank import rerank
+from anamnestic.search.hybrid import Hit
+from anamnestic.search.rerank import rerank
 
 
 class RerankTests(unittest.TestCase):
@@ -18,7 +18,7 @@ class RerankTests(unittest.TestCase):
             for i in range(1, n + 1)
         ]
 
-    @patch("anamnesis.search.rerank._get_reranker")
+    @patch("anamnestic.search.rerank._get_reranker")
     def test_rerank_reorders_hits(self, mock_get):
         mock_reranker = MagicMock()
         # Reverse order: last document scores highest
@@ -38,7 +38,7 @@ class RerankTests(unittest.TestCase):
         self.assertEqual(result[2].turn_id, 1)  # was index 0
         self.assertAlmostEqual(result[0].rerank_score, 0.95)
 
-    @patch("anamnesis.search.rerank._get_reranker")
+    @patch("anamnestic.search.rerank._get_reranker")
     def test_rerank_fallback_on_unavailable(self, mock_get):
         mock_get.return_value = None
         hits = self._make_hits(5)
@@ -51,7 +51,7 @@ class RerankTests(unittest.TestCase):
         result = rerank("query", [], top_k=3)
         self.assertEqual(len(result), 0)
 
-    @patch("anamnesis.search.rerank._get_reranker")
+    @patch("anamnestic.search.rerank._get_reranker")
     def test_rerank_handles_exception(self, mock_get):
         mock_reranker = MagicMock()
         mock_reranker.rerank.side_effect = RuntimeError("model crashed")

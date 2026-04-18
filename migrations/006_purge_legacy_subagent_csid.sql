@@ -34,8 +34,8 @@ DELETE FROM sdk_sessions
 WHERE platform_source = 'claude-subagent'
   AND instr(content_session_id, ':') = 0;
 
-DELETE FROM anamnesis_ingest_state
+DELETE FROM anamnestic_ingest_state
 WHERE source = 'claude-subagent';
 
--- Note: anamnesis_embed_state rows for dropped historical_turns are cleaned by
+-- Note: anamnestic_embed_state rows for dropped historical_turns are cleaned by
 -- the FK cascade (ON DELETE CASCADE).

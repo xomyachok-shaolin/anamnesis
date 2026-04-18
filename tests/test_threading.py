@@ -2,7 +2,7 @@ import sqlite3
 import unittest
 from unittest.mock import patch, MagicMock
 
-from anamnesis import threading
+from anamnestic import threading
 
 
 class _UnclosableConn(sqlite3.Connection):
@@ -29,13 +29,13 @@ def _make_conn_with_sessions(sessions):
             custom_title TEXT,
             prompt_counter INTEGER DEFAULT 0
         );
-        CREATE TABLE anamnesis_session_threads (
+        CREATE TABLE anamnestic_session_threads (
             session_id TEXT PRIMARY KEY,
             thread_id INTEGER NOT NULL,
             thread_order INTEGER NOT NULL
         );
         CREATE INDEX idx_threads_thread
-            ON anamnesis_session_threads(thread_id, thread_order);
+            ON anamnestic_session_threads(thread_id, thread_order);
     """)
     for s in sessions:
         conn.execute(

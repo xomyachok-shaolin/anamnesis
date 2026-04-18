@@ -8,7 +8,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from anamnesis.search.hybrid import Hit, SearchDiagnostics, search, _bm25
+from anamnestic.search.hybrid import Hit, SearchDiagnostics, search, _bm25
 
 
 def _make_db():
@@ -49,7 +49,7 @@ def _make_db():
             content='session_summaries',
             content_rowid='id'
         );
-        CREATE TABLE anamnesis_entity_edges (
+        CREATE TABLE anamnestic_entity_edges (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             entity_a TEXT NOT NULL,
             entity_b TEXT NOT NULL,
@@ -57,7 +57,7 @@ def _make_db():
             sessions TEXT,
             UNIQUE(entity_a, entity_b)
         );
-        CREATE TABLE anamnesis_entities (
+        CREATE TABLE anamnestic_entities (
             id INTEGER PRIMARY KEY,
             turn_id INTEGER,
             entity_type TEXT,
@@ -107,8 +107,8 @@ class RRFFusionTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
     def test_bm25_only_produces_rrf_scores(self, *_):
         """BM25-only search should produce valid RRF scores."""
         hits = search(self.conn, "deploy production", top_k=5)
@@ -117,8 +117,8 @@ class RRFFusionTests(unittest.TestCase):
             self.assertGreater(h.rrf_score, 0)
             self.assertIsNotNone(h.bm25_rank)
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
     def test_rrf_score_formula(self, *_):
         """RRF score = weight / (K + rank). Verify the math."""
         hits = _bm25(self.conn, "deploy", 10)
@@ -127,14 +127,14 @@ class RRFFusionTests(unittest.TestCase):
         # After importance and decay, score changes, but the base should be right
         expected_base = 1.0 / (60 + 1)
         # Run full search with importance=0 and decay off
-        with patch("anamnesis.config.IMPORTANCE_WEIGHT", 0), \
-             patch("anamnesis.config.DECAY_ENABLED", False):
+        with patch("anamnestic.config.IMPORTANCE_WEIGHT", 0), \
+             patch("anamnestic.config.DECAY_ENABLED", False):
             hits = search(self.conn, "deploy", top_k=5)
         self.assertGreater(len(hits), 0)
         self.assertAlmostEqual(hits[0].rrf_score, expected_base, places=4)
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
     def test_multi_channel_merge_boosts_shared_hits(self, *_):
         """A turn found by both BM25 and temporal should score higher than BM25-only."""
         now = datetime.now()
@@ -150,8 +150,8 @@ class RRFFusionTests(unittest.TestCase):
                      timestamp=old.isoformat())
         self.conn.commit()
 
-        with patch("anamnesis.config.IMPORTANCE_WEIGHT", 0), \
-             patch("anamnesis.config.DECAY_ENABLED", False):
+        with patch("anamnestic.config.IMPORTANCE_WEIGHT", 0), \
+             patch("anamnestic.config.DECAY_ENABLED", False):
             hits = search(self.conn, "deploy yesterday", top_k=10)
 
         hit_map = {h.turn_id: h for h in hits}
@@ -179,12 +179,12 @@ class ImportanceWeightingTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_high_importance_boosts_score(self, *_):
         """Turn with importance=0.9 should rank above importance=0.1."""
-        with patch("anamnesis.config.IMPORTANCE_WEIGHT", 0.3):
+        with patch("anamnestic.config.IMPORTANCE_WEIGHT", 0.3):
             hits = search(self.conn, "deploy", top_k=10)
         self.assertGreaterEqual(len(hits), 2)
         # Find our turns
@@ -193,12 +193,12 @@ class ImportanceWeightingTests(unittest.TestCase):
         self.assertIn(2, hit_map)
         self.assertGreater(hit_map[1].rrf_score, hit_map[2].rrf_score)
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_zero_importance_weight_means_no_effect(self, *_):
         """With IMPORTANCE_WEIGHT=0, all turns with same BM25 rank get same score."""
-        with patch("anamnesis.config.IMPORTANCE_WEIGHT", 0):
+        with patch("anamnestic.config.IMPORTANCE_WEIGHT", 0):
             hits = search(self.conn, "deploy", top_k=10)
         scores = [h.rrf_score for h in hits]
         # All should have base RRF scores unmodified by importance
@@ -226,13 +226,13 @@ class TemporalDecayTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
     def test_recent_turn_scores_higher_than_old(self, *_):
         """Recent turn should score higher after decay than 180-day-old turn."""
-        with patch("anamnesis.config.DECAY_ENABLED", True), \
-             patch("anamnesis.config.DECAY_HALF_LIFE_DAYS", 90):
+        with patch("anamnestic.config.DECAY_ENABLED", True), \
+             patch("anamnestic.config.DECAY_HALF_LIFE_DAYS", 90):
             hits = search(self.conn, "deploy config", top_k=10)
         hit_map = {h.turn_id: h for h in hits}
         self.assertIn(1, hit_map)
@@ -240,12 +240,12 @@ class TemporalDecayTests(unittest.TestCase):
         self.assertGreater(hit_map[1].rrf_score, hit_map[2].rrf_score,
                            "Recent turn should rank above old turn after decay")
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
     def test_decay_disabled_no_penalty(self, *_):
         """With decay off, same-query turns get equal base scores regardless of age."""
-        with patch("anamnesis.config.DECAY_ENABLED", False):
+        with patch("anamnestic.config.DECAY_ENABLED", False):
             hits = search(self.conn, "deploy config", top_k=10)
         # Both should have pure BM25 RRF scores
         for h in hits:
@@ -269,40 +269,40 @@ class GraphChannelFusionTests(unittest.TestCase):
 
         # Entity setup: /path/deploy co-occurs with /path/nginx
         self.conn.execute(
-            "INSERT INTO anamnesis_entity_edges (entity_a, entity_b, weight) "
+            "INSERT INTO anamnestic_entity_edges (entity_a, entity_b, weight) "
             "VALUES ('/path/deploy', '/path/nginx', 5)"
         )
         self.conn.execute(
-            "INSERT INTO anamnesis_entities VALUES (1, 1, 'path', '/path/deploy')"
+            "INSERT INTO anamnestic_entities VALUES (1, 1, 'path', '/path/deploy')"
         )
         self.conn.execute(
-            "INSERT INTO anamnesis_entities VALUES (2, 2, 'path', '/path/nginx')"
+            "INSERT INTO anamnestic_entities VALUES (2, 2, 'path', '/path/nginx')"
         )
         self.conn.commit()
 
     def tearDown(self):
         self.conn.close()
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_graph_channel_adds_hits(self, *_):
         """Graph traversal should surface turns not found by BM25."""
-        with patch("anamnesis.config.GRAPH_WEIGHT", 0.5), \
-             patch("anamnesis.config.GRAPH_MAX_HOPS", 2), \
-             patch("anamnesis.entities.extract",
+        with patch("anamnestic.config.GRAPH_WEIGHT", 0.5), \
+             patch("anamnestic.config.GRAPH_MAX_HOPS", 2), \
+             patch("anamnestic.entities.extract",
                    return_value=iter([("path", "/path/deploy")])):
             hits = search(self.conn, "/path/deploy", top_k=10)
         turn_ids = {h.turn_id for h in hits}
         # Turn 2 (nginx) should be found via graph even though it doesn't match query text
         self.assertIn(2, turn_ids, "Graph channel should surface related turns")
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_graph_weight_zero_disables_channel(self, *_):
         """With GRAPH_WEIGHT=0, graph channel should not fire."""
-        with patch("anamnesis.config.GRAPH_WEIGHT", 0):
+        with patch("anamnestic.config.GRAPH_WEIGHT", 0):
             hits = search(self.conn, "/path/deploy", top_k=10)
         # Turn 2 should NOT be found (no BM25 match, graph disabled)
         turn_ids = {h.turn_id for h in hits}
@@ -329,10 +329,10 @@ class SummaryChannelTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_summaries_appear_in_results(self, *_):
         """Session summaries should appear as hits with negative turn_id."""
         hits = search(self.conn, "deploying microservices", top_k=10)
@@ -340,10 +340,10 @@ class SummaryChannelTests(unittest.TestCase):
         self.assertGreater(len(summary_hits), 0, "Summaries should appear in results")
         self.assertEqual(summary_hits[0].hit_type, "summary")
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_summary_hits_skip_importance_weighting(self, *_):
         """Summary hits (negative IDs) should not be affected by importance lookup."""
         hits = search(self.conn, "deploying microservices", top_k=10)
@@ -370,10 +370,10 @@ class MergeByTurnIdTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_same_turn_merges_channels(self, *_):
         """Turn found by BM25 and temporal should have both ranks set."""
         hits = search(self.conn, "deploy yesterday", top_k=10)
@@ -387,10 +387,10 @@ class MergeByTurnIdTests(unittest.TestCase):
         expected = 1.0 / (60 + h.bm25_rank) + 1.0 / (60 + h.temporal_rank)
         self.assertAlmostEqual(h.rrf_score, expected, places=4)
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_no_duplicate_hits(self, *_):
         """Same turn from multiple channels should appear once, not duplicated."""
         hits = search(self.conn, "deploy yesterday", top_k=10)
@@ -413,10 +413,10 @@ class DiagnosticsTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_diagnostics_attached_to_result(self, *_):
         """Search result should carry diagnostics with channel counts."""
         hits = search(self.conn, "deploy", top_k=5)
@@ -428,10 +428,10 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertEqual(diag.graph_hits, 0)  # GRAPH_WEIGHT=0
         self.assertGreater(diag.fused_total, 0)
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_diagnostics_to_dict(self, *_):
         """Diagnostics.to_dict() should return a serializable dict."""
         hits = search(self.conn, "deploy", top_k=5)
@@ -441,10 +441,10 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIn("fused_total", d)
         self.assertIn("reranked", d)
 
-    @patch("anamnesis.search.hybrid.local_embed_model_ready", return_value=False)
-    @patch("anamnesis.config.GRAPH_WEIGHT", 0)
-    @patch("anamnesis.config.IMPORTANCE_WEIGHT", 0)
-    @patch("anamnesis.config.DECAY_ENABLED", False)
+    @patch("anamnestic.search.hybrid.local_embed_model_ready", return_value=False)
+    @patch("anamnestic.config.GRAPH_WEIGHT", 0)
+    @patch("anamnestic.config.IMPORTANCE_WEIGHT", 0)
+    @patch("anamnestic.config.DECAY_ENABLED", False)
     def test_result_still_behaves_as_list(self, *_):
         """SearchResult should be iterable, indexable, and have len()."""
         hits = search(self.conn, "deploy", top_k=5)

@@ -3,13 +3,13 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from anamnesis.search.temporal import detect_time_range, temporal_search
+from anamnestic.search.temporal import detect_time_range, temporal_search
 
 
 class DetectTimeRangeTests(unittest.TestCase):
     """Test temporal expression parsing for EN and RU."""
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_yesterday_ru(self, mock_now):
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
         r = detect_time_range("что делали вчера")
@@ -17,14 +17,14 @@ class DetectTimeRangeTests(unittest.TestCase):
         self.assertTrue(r[0].startswith("2026-04-17"))
         self.assertTrue(r[1].startswith("2026-04-17"))
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_yesterday_en(self, mock_now):
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
         r = detect_time_range("what happened yesterday")
         self.assertIsNotNone(r)
         self.assertTrue(r[0].startswith("2026-04-17"))
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_today_ru(self, mock_now):
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
         r = detect_time_range("поиск сегодня")
@@ -32,7 +32,7 @@ class DetectTimeRangeTests(unittest.TestCase):
         self.assertTrue(r[0].startswith("2026-04-18"))
         self.assertTrue(r[1].startswith("2026-04-18"))
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_last_week_ru(self, mock_now):
         # Friday April 18 2026
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
@@ -43,27 +43,27 @@ class DetectTimeRangeTests(unittest.TestCase):
         self.assertLess(start, mock_now.return_value)
         self.assertLess(end, mock_now.return_value)
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_last_week_en(self, mock_now):
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
         r = detect_time_range("last week changes")
         self.assertIsNotNone(r)
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_n_days_ago_en(self, mock_now):
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
         r = detect_time_range("3 days ago")
         self.assertIsNotNone(r)
         self.assertTrue(r[0].startswith("2026-04-15"))
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_n_days_ago_ru(self, mock_now):
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
         r = detect_time_range("5 дней назад")
         self.assertIsNotNone(r)
         self.assertTrue(r[0].startswith("2026-04-13"))
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_month_name_ru(self, mock_now):
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
         r = detect_time_range("в марте")
@@ -71,7 +71,7 @@ class DetectTimeRangeTests(unittest.TestCase):
         self.assertTrue(r[0].startswith("2026-03-01"))
         self.assertTrue(r[1].startswith("2026-03-31"))
 
-    @patch("anamnesis.search.temporal._now")
+    @patch("anamnestic.search.temporal._now")
     def test_month_name_en(self, mock_now):
         mock_now.return_value = datetime(2026, 4, 18, 14, 30)
         r = detect_time_range("in march")

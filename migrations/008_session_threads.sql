@@ -5,11 +5,11 @@
 -- Subagent sessions (csid contains ':') are excluded — they are already
 -- linked to their parent by convention.
 
-CREATE TABLE IF NOT EXISTS anamnesis_session_threads (
+CREATE TABLE IF NOT EXISTS anamnestic_session_threads (
     session_id TEXT PRIMARY KEY,
     thread_id INTEGER NOT NULL,
     thread_order INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_threads_thread
-    ON anamnesis_session_threads(thread_id, thread_order);
+    ON anamnestic_session_threads(thread_id, thread_order);

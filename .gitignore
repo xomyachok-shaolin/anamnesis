@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
-.anamnesis-data/
+.anamnestic-data/
 .DS_Store
 *.egg-info/
 .pytest_cache/

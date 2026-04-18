@@ -1,4 +1,4 @@
--- Migration 000: create the standalone base schema expected by anamnesis.
+-- Migration 000: create the standalone base schema expected by anamnestic.
 -- Safe on top of an existing claude-mem database because every object is IF NOT EXISTS.
 
 CREATE TABLE IF NOT EXISTS sdk_sessions (

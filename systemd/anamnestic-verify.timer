@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily anamnestic verify (integrity + drift + orphans)
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=1h
+Unit=anamnestic-verify.service
+
+[Install]
+WantedBy=timers.target

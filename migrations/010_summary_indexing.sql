@@ -7,7 +7,7 @@ ALTER TABLE session_summaries ADD COLUMN summary_text TEXT;
 ALTER TABLE session_summaries ADD COLUMN content_session_id TEXT;
 
 -- Track which sessions have been extractively summarized
-CREATE TABLE IF NOT EXISTS anamnesis_summary_state (
+CREATE TABLE IF NOT EXISTS anamnestic_summary_state (
     content_session_id TEXT PRIMARY KEY,
     summarized_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

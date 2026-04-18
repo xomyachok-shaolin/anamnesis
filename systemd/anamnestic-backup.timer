@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily anamnestic backup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=30min
+Unit=anamnestic-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -29,11 +29,11 @@
 - **Decay / consolidation** — экспоненциальное затухание по времени (настраиваемый период полураспада, по умолчанию 90 дней). Опциональная архивация старых low-importance turns. Миграция 011.
 - **Entity graph** — граф совместной встречаемости сущностей в сессиях. BFS-обход графа как четвёртый канал RRF. Миграция 012.
 - **Версионирование** — pyproject.toml с semver, журнал изменений.
-- CLI-команда `anamnesis archive` для ручной архивации старых turns.
+- CLI-команда `anamnestic archive` для ручной архивации старых turns.
 
 ### Изменено
 
-- `anamnesis sync` теперь дополнительно выполняет importance backfill, генерацию саммари и построение рёбер графа.
+- `anamnestic sync` теперь дополнительно выполняет importance backfill, генерацию саммари и построение рёбер графа.
 - Ответ `mem_search` MCP-инструмента включает поля `rerank_score`, `temporal_rank`, `graph_rank`, `hit_type`.
 - Поисковый пайплайн: 4 канала RRF → importance weighting → decay factor → cross-encoder rerank.
 - Entity graph: pruning рёбер с weight < 2 (шумоподавление), IDF-нормализация `weight / log2(degree + 1)` для подавления сущностей-хабов.

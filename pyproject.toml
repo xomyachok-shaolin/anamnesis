@@ -39,13 +39,13 @@ dev = [
 ]
 
 [project.scripts]
-anamnesis = "anamnesis.cli:main"
+anamnestic = "anamnestic.cli:main"
 
 [tool.setuptools.dynamic]
-version = {attr = "anamnesis.__version__"}
+version = {attr = "anamnestic.__version__"}
 
 [tool.setuptools.packages.find]
-include = ["anamnesis*"]
+include = ["anamnestic*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

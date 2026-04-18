@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from anamnesis.summarize import summarize_session
+from anamnestic.summarize import summarize_session
 
 
 class SummarizeSessionTests(unittest.TestCase):
@@ -46,11 +46,11 @@ class SummarizeSessionTests(unittest.TestCase):
                 created_at TEXT NOT NULL,
                 created_at_epoch INTEGER NOT NULL
             );
-            CREATE TABLE anamnesis_summary_state (
+            CREATE TABLE anamnestic_summary_state (
                 content_session_id TEXT PRIMARY KEY,
                 summarized_at TEXT NOT NULL DEFAULT (datetime('now'))
             );
-            CREATE TABLE anamnesis_entities (
+            CREATE TABLE anamnestic_entities (
                 id INTEGER PRIMARY KEY,
                 turn_id INTEGER,
                 entity_type TEXT,
@@ -75,7 +75,7 @@ class SummarizeSessionTests(unittest.TestCase):
             )
         # Entity
         self.conn.execute(
-            "INSERT INTO anamnesis_entities VALUES (1, 2, 'path', '/etc/nginx/nginx.conf')"
+            "INSERT INTO anamnestic_entities VALUES (1, 2, 'path', '/etc/nginx/nginx.conf')"
         )
         self.conn.commit()
 
@@ -107,7 +107,7 @@ class SummarizeSessionTests(unittest.TestCase):
         summarize_session(self.conn, "s1")
         self.conn.commit()
         state = self.conn.execute(
-            "SELECT * FROM anamnesis_summary_state WHERE content_session_id = 's1'"
+            "SELECT * FROM anamnestic_summary_state WHERE content_session_id = 's1'"
         ).fetchone()
         self.assertIsNotNone(state)
 

@@ -1,0 +1,26 @@
+[Unit]
+Description=anamnestic daily backup
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/anamnestic
+Environment=PYTHONPATH=%h/projects/anamnestic
+ExecStart=%h/.claude-mem/semantic-env/bin/python -m anamnestic.cli backup
+
+# --- resource limits ---
+MemoryMax=1G
+CPUQuota=50%
+TasksMax=16
+
+# --- scheduling ---
+Nice=19
+IOSchedulingClass=idle
+
+# --- hardening ---
+ProtectSystem=strict
+ReadWritePaths=%h/.claude-mem %h/claude-mem-backups
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

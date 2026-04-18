@@ -23,7 +23,7 @@ sys.modules.setdefault("mcp", mcp_module)
 sys.modules.setdefault("mcp.server", mcp_server_module)
 sys.modules.setdefault("mcp.server.fastmcp", fastmcp_module)
 
-from anamnesis.daemon import mcp_server
+from anamnestic.daemon import mcp_server
 
 
 _audit_log: list[tuple] = []
@@ -34,7 +34,7 @@ def _fake_write_audit(action, status, duration_sec, details):
 
 
 # Silence real audit writes during tests, capture calls for inspection.
-import anamnesis.audit as _audit_mod  # noqa: E402
+import anamnestic.audit as _audit_mod  # noqa: E402
 
 _audit_mod.write_audit = _fake_write_audit
 

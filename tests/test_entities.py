@@ -1,6 +1,6 @@
 import unittest
 
-from anamnesis.entities import extract
+from anamnestic.entities import extract
 
 
 class ExtractTests(unittest.TestCase):

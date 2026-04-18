@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from anamnesis.graph import graph_search
+from anamnestic.graph import graph_search
 
 
 class GraphSearchTests(unittest.TestCase):
@@ -9,7 +9,7 @@ class GraphSearchTests(unittest.TestCase):
         self.conn = sqlite3.connect(":memory:")
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript("""
-            CREATE TABLE anamnesis_entity_edges (
+            CREATE TABLE anamnestic_entity_edges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 entity_a TEXT NOT NULL,
                 entity_b TEXT NOT NULL,
@@ -17,7 +17,7 @@ class GraphSearchTests(unittest.TestCase):
                 sessions TEXT,
                 UNIQUE(entity_a, entity_b)
             );
-            CREATE TABLE anamnesis_entities (
+            CREATE TABLE anamnestic_entities (
                 id INTEGER PRIMARY KEY,
                 turn_id INTEGER,
                 entity_type TEXT,
@@ -42,14 +42,14 @@ class GraphSearchTests(unittest.TestCase):
         # Build a small graph: A -- B -- C
         #                            \-- D (low weight, below MIN_EDGE_WEIGHT)
         self.conn.execute(
-            "INSERT INTO anamnesis_entity_edges (entity_a, entity_b, weight) VALUES ('/path/a', '/path/b', 5)"
+            "INSERT INTO anamnestic_entity_edges (entity_a, entity_b, weight) VALUES ('/path/a', '/path/b', 5)"
         )
         self.conn.execute(
-            "INSERT INTO anamnesis_entity_edges (entity_a, entity_b, weight) VALUES ('/path/b', '/path/c', 3)"
+            "INSERT INTO anamnestic_entity_edges (entity_a, entity_b, weight) VALUES ('/path/b', '/path/c', 3)"
         )
         # weight=1 is below MIN_EDGE_WEIGHT=2, so this edge should be pruned
         self.conn.execute(
-            "INSERT INTO anamnesis_entity_edges (entity_a, entity_b, weight) VALUES ('/path/b', '/path/d', 1)"
+            "INSERT INTO anamnestic_entity_edges (entity_a, entity_b, weight) VALUES ('/path/b', '/path/d', 1)"
         )
 
         # Turns mentioning these entities
@@ -63,9 +63,9 @@ class GraphSearchTests(unittest.TestCase):
         self.conn.execute(
             "INSERT INTO historical_turns VALUES (3, 'turn about D', 's1', 3, 'assistant', '2026-04-15T12:00:00', 'claude')"
         )
-        self.conn.execute("INSERT INTO anamnesis_entities VALUES (1, 1, 'path', '/path/b')")
-        self.conn.execute("INSERT INTO anamnesis_entities VALUES (2, 2, 'path', '/path/c')")
-        self.conn.execute("INSERT INTO anamnesis_entities VALUES (3, 3, 'path', '/path/d')")
+        self.conn.execute("INSERT INTO anamnestic_entities VALUES (1, 1, 'path', '/path/b')")
+        self.conn.execute("INSERT INTO anamnestic_entities VALUES (2, 2, 'path', '/path/c')")
+        self.conn.execute("INSERT INTO anamnestic_entities VALUES (3, 3, 'path', '/path/d')")
         self.conn.commit()
 
     def tearDown(self):
@@ -118,17 +118,17 @@ class GraphSearchTests(unittest.TestCase):
         """Rare entities (low degree) should rank above common ones."""
         # Add a hub entity connected to many things (high degree)
         self.conn.execute(
-            "INSERT INTO anamnesis_entity_edges (entity_a, entity_b, weight) "
+            "INSERT INTO anamnestic_entity_edges (entity_a, entity_b, weight) "
             "VALUES ('/path/hub', '/path/e1', 3)"
         )
         for i in range(2, 20):
             self.conn.execute(
-                "INSERT INTO anamnesis_entity_edges (entity_a, entity_b, weight) "
+                "INSERT INTO anamnestic_entity_edges (entity_a, entity_b, weight) "
                 f"VALUES ('/path/hub', '/path/noise{i}', 2)"
             )
         # Add a rare entity with same weight but low degree
         self.conn.execute(
-            "INSERT INTO anamnesis_entity_edges (entity_a, entity_b, weight) "
+            "INSERT INTO anamnestic_entity_edges (entity_a, entity_b, weight) "
             "VALUES ('/path/rare_src', '/path/e1', 3)"
         )
         # e1 is reachable from both hub (high degree) and rare_src (low degree)
@@ -138,7 +138,7 @@ class GraphSearchTests(unittest.TestCase):
             "'assistant', '2026-04-15T10:00:00', 'claude')"
         )
         self.conn.execute(
-            "INSERT INTO anamnesis_entities VALUES (10, 10, 'path', '/path/e1')"
+            "INSERT INTO anamnestic_entities VALUES (10, 10, 'path', '/path/e1')"
         )
         self.conn.commit()
 

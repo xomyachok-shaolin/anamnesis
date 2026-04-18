@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from anamnesis.importance import score, backfill
+from anamnestic.importance import score, backfill
 
 
 class ScoreTests(unittest.TestCase):
@@ -82,7 +82,7 @@ class BackfillTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-        import anamnesis.db as db_mod
+        import anamnestic.db as db_mod
         self._orig_connect = db_mod.connect
         db_path = self._db_path
         def _test_connect():
@@ -92,7 +92,7 @@ class BackfillTests(unittest.TestCase):
         db_mod.connect = _test_connect
 
     def tearDown(self):
-        import anamnesis.db as db_mod
+        import anamnestic.db as db_mod
         db_mod.connect = self._orig_connect
         import os
         os.unlink(self._db_path)
@@ -101,7 +101,7 @@ class BackfillTests(unittest.TestCase):
         result = backfill()
         self.assertEqual(result["scored"], 2)  # only rows with importance=0.5
 
-        import anamnesis.db as db_mod
+        import anamnestic.db as db_mod
         conn = db_mod.connect()
         rows = conn.execute(
             "SELECT id, importance FROM historical_turns ORDER BY id"

@@ -3,7 +3,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from anamnesis.ingest.parsers import parse_claude_jsonl, parse_codex_jsonl, ts_to_epoch
+from anamnestic.ingest.parsers import parse_claude_jsonl, parse_codex_jsonl, ts_to_epoch
 
 
 class ParserTests(unittest.TestCase):

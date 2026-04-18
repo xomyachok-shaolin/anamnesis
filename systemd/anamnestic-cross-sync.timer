@@ -1,0 +1,12 @@
+[Unit]
+Description=Run anamnestic cross-host sync every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+RandomizedDelaySec=30s
+Unit=anamnestic-cross-sync.service
+
+[Install]
+WantedBy=timers.target

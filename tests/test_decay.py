@@ -2,7 +2,7 @@ import sqlite3
 import unittest
 from datetime import datetime, timedelta
 
-from anamnesis.decay import decay_factor, archive_old_turns
+from anamnestic.decay import decay_factor, archive_old_turns
 
 
 class DecayFactorTests(unittest.TestCase):
@@ -52,7 +52,7 @@ class ArchiveTests(unittest.TestCase):
                 platform_source TEXT,
                 importance REAL DEFAULT 0.5
             );
-            CREATE TABLE anamnesis_archived_turns (
+            CREATE TABLE anamnestic_archived_turns (
                 id INTEGER PRIMARY KEY,
                 content_session_id TEXT NOT NULL,
                 turn_number INTEGER,
@@ -64,11 +64,11 @@ class ArchiveTests(unittest.TestCase):
                 archived_at TEXT NOT NULL DEFAULT (datetime('now')),
                 archive_reason TEXT
             );
-            CREATE TABLE anamnesis_summary_state (
+            CREATE TABLE anamnestic_summary_state (
                 content_session_id TEXT PRIMARY KEY,
                 summarized_at TEXT
             );
-            CREATE TABLE anamnesis_embed_state (
+            CREATE TABLE anamnestic_embed_state (
                 turn_id INTEGER PRIMARY KEY,
                 collection TEXT,
                 embedded_at TEXT
@@ -99,8 +99,8 @@ class ArchiveTests(unittest.TestCase):
         )
 
         # Only s1 has a summary
-        self.conn.execute("INSERT INTO anamnesis_summary_state VALUES ('s1', datetime('now'))")
-        self.conn.execute("INSERT INTO anamnesis_embed_state VALUES (1, 'col', datetime('now'))")
+        self.conn.execute("INSERT INTO anamnestic_summary_state VALUES ('s1', datetime('now'))")
+        self.conn.execute("INSERT INTO anamnestic_embed_state VALUES (1, 'col', datetime('now'))")
         self.conn.commit()
 
     def tearDown(self):
@@ -111,7 +111,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertEqual(result["archived"], 1)
 
         # Turn 1 should be archived
-        archived = self.conn.execute("SELECT * FROM anamnesis_archived_turns").fetchall()
+        archived = self.conn.execute("SELECT * FROM anamnestic_archived_turns").fetchall()
         self.assertEqual(len(archived), 1)
         self.assertEqual(archived[0]["id"], 1)
 
@@ -124,7 +124,7 @@ class ArchiveTests(unittest.TestCase):
         self.assertIn(4, remaining_ids)  # no summary
 
         # Embed state cleaned
-        es = self.conn.execute("SELECT * FROM anamnesis_embed_state").fetchall()
+        es = self.conn.execute("SELECT * FROM anamnestic_embed_state").fetchall()
         self.assertEqual(len(es), 0)
 
     def test_archive_returns_zero_when_nothing_to_archive(self):

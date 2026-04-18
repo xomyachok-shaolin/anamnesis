@@ -1,0 +1,32 @@
+[Unit]
+Description=anamnestic cross-host bidirectional jsonl sync
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/projects/anamnestic
+Environment=PYTHONPATH=%h/projects/anamnestic
+# Peers default to ~/.claude-mem/peers.txt (one host per line, optional user@).
+# Override with: systemctl --user edit anamnestic-cross-sync.service
+#   [Service]
+#   Environment=ANAMNESTIC_PEERS=10.0.1.78,laptop.local
+ExecStart=%h/.claude-mem/semantic-env/bin/python -m anamnestic.cli cross-sync
+
+# --- resource limits ---
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=32
+
+# --- scheduling ---
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+# --- hardening (rsync needs network + reads/writes home) ---
+ProtectSystem=strict
+ReadWritePaths=%h/.claude-mem %h/.claude %h/.codex
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

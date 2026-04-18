@@ -1,5 +1,5 @@
 -- Migration 011: archive table for consolidated old turns.
-CREATE TABLE IF NOT EXISTS anamnesis_archived_turns (
+CREATE TABLE IF NOT EXISTS anamnestic_archived_turns (
     id INTEGER PRIMARY KEY,
     content_session_id TEXT NOT NULL,
     turn_number INTEGER,
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS anamnesis_archived_turns (
 );
 
 CREATE INDEX IF NOT EXISTS idx_archived_turns_timestamp
-    ON anamnesis_archived_turns(timestamp);
+    ON anamnestic_archived_turns(timestamp);
 
 CREATE INDEX IF NOT EXISTS idx_archived_turns_session
-    ON anamnesis_archived_turns(content_session_id);
+    ON anamnestic_archived_turns(content_session_id);

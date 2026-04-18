@@ -1,4 +1,4 @@
-# anamnesis
+# anamnestic
 
 Персистентная память с гибридным поиском для сессий AI-CLI.
 
@@ -18,25 +18,52 @@ pip install anamnestic
 
 ## Архитектура
 
-```
-jsonl-источники (Claude Code / sub-агенты / Codex / VS Code Copilot)
-       │
-       │  mtime-сканер, парсер под формат
-       ▼
-SQLite ── historical_turns (+ FTS5)              ◄── BM25
-  │    ── session_summaries (+ FTS5)             ◄── BM25 (слой наблюдений)
-  │    ── anamnesis_entities                     ◄── поиск по сущностям
-  │    ── anamnesis_entity_edges                 ◄── обход графа
-  │
-  │  инкрементальный ONNX-эмбеддер (MiniLM-L12-v2)
-  ▼
-Chroma (persistent, file-based)                   ◄── семантика
-  │
-  │  4-канальный Reciprocal Rank Fusion (K=60)
-  │  + importance weighting + temporal decay
-  │  + cross-encoder reranking
-  ▼
-stdio MCP-сервер  ──►  Claude Code / Codex / любой MCP-клиент
+```mermaid
+flowchart TD
+    subgraph sources ["Источники"]
+        CC[Claude Code<br/>main + sub-агенты]
+        CX[Codex CLI]
+        VS[VS Code Copilot]
+    end
+
+    sources -->|mtime-сканер<br/>парсер под формат| SQLite
+
+    subgraph SQLite ["SQLite"]
+        HT[historical_turns + FTS5]
+        SS[session_summaries + FTS5]
+        EN[anamnestic_entities]
+        EE[anamnestic_entity_edges]
+    end
+
+    subgraph Chroma ["Chroma (persistent)"]
+        EMB[ONNX-эмбеддинги<br/>MiniLM-L12-v2]
+    end
+
+    SQLite -->|инкрементальный<br/>эмбеддер| Chroma
+
+    HT --> BM25[BM25]
+    SS --> BM25
+    EN --> GRAPH[Граф сущностей]
+    EE --> GRAPH
+    EMB --> SEM[Семантика]
+    SQLite --> TEMP[Темпоральный]
+
+    subgraph RRF ["Reciprocal Rank Fusion (K=60)"]
+        BM25
+        SEM
+        TEMP
+        GRAPH
+    end
+
+    RRF -->|importance weighting<br/>temporal decay<br/>cross-encoder reranking| MCP
+
+    MCP[stdio MCP-сервер] --> clients
+
+    subgraph clients ["MCP-клиенты"]
+        C1[Claude Code]
+        C2[Codex]
+        C3[Любой MCP-клиент]
+    end
 ```
 
 ## Поисковый пайплайн
@@ -78,15 +105,15 @@ stdio MCP-сервер  ──►  Claude Code / Codex / любой MCP-клие
 ## CLI
 
 ```bash
-anamnesis sync       # ingest + embed + обогащение (сущности, потоки, importance, саммари, граф)
-anamnesis search "запрос"
-anamnesis status     # снимок здоровья корпуса
-anamnesis verify     # проверки целостности (FTS, drift, сироты)
-anamnesis backup     # WAL-safe tar (хранит последние 10)
-anamnesis restore    # восстановление из бэкапа
-anamnesis audit      # лог последних операций
-anamnesis eval       # регрессионный тест по golden-запросам
-anamnesis archive    # архивация старых low-importance turns
+anamnestic sync       # ingest + embed + обогащение (сущности, потоки, importance, саммари, граф)
+anamnestic search "запрос"
+anamnestic status     # снимок здоровья корпуса
+anamnestic verify     # проверки целостности (FTS, drift, сироты)
+anamnestic backup     # WAL-safe tar (хранит последние 10)
+anamnestic restore    # восстановление из бэкапа
+anamnestic audit      # лог последних операций
+anamnestic eval       # регрессионный тест по golden-запросам
+anamnestic archive    # архивация старых low-importance turns
 ```
 
 ## Установка
@@ -95,10 +122,10 @@ anamnesis archive    # архивация старых low-importance turns
 
 ## Принципы дизайна
 
-- **Файл — единица идемпотентности.** `anamnesis_ingest_state` хранит `(source, path, mtime_ns)`; повторный запуск пропускает неизменённые файлы.
+- **Файл — единица идемпотентности.** `anamnestic_ingest_state` хранит `(source, path, mtime_ns)`; повторный запуск пропускает неизменённые файлы.
 - **Turn — единица хранения.** `historical_turns` с UNIQUE-ключом `(content_session_id, turn_number)`; UPSERT не плодит дубликаты.
-- **Формат — ответственность парсера.** Добавить новый CLI-агент = написать парсер в `anamnesis/ingest/` и зарегистрировать glob.
-- **Каждая операция аудируется.** `anamnesis_audit` логирует sync/verify/backup/restore с длительностью и JSON-payload.
+- **Формат — ответственность парсера.** Добавить новый CLI-агент = написать парсер в `anamnestic/ingest/` и зарегистрировать glob.
+- **Каждая операция аудируется.** `anamnestic_audit` логирует sync/verify/backup/restore с длительностью и JSON-payload.
 - **Auto-sync при старте MCP.** Лёгкий ingest + embed при запуске сервера — данные всегда актуальны.
 
 ## Тесты

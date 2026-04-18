@@ -1,7 +1,7 @@
 import sqlite3
 import unittest
 
-from anamnesis.search.hybrid import _bm25, _fts_query
+from anamnestic.search.hybrid import _bm25, _fts_query
 
 DEMO_PROJECT = "/workspace/projects/Тестовый проект (демо)"
 DEMO_TITLE = "Тестовый проект"
