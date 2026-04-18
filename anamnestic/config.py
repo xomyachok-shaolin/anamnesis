@@ -95,5 +95,9 @@ def is_project_in_scope(project: str | None) -> bool:
 
 
 def local_embed_model_ready() -> bool:
+    try:
+        import fastembed  # noqa: F401
+    except ImportError:
+        return False
     cache_dir = Path(FASTEMBED_CACHE)
     return any(cache_dir.rglob("model_optimized.onnx"))

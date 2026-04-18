@@ -122,9 +122,11 @@ def cmd_backup(args):
 
 def cmd_restore(args):
     from anamnestic.restore import run
+    from anamnestic.db import run_migrations
     with audited("restore") as details:
         info = run(args.tarball, force=args.force)
         details.update(info)
+    run_migrations()
     print(json.dumps(info, indent=2, ensure_ascii=False))
 
 
@@ -289,7 +291,7 @@ def build_parser():
     ar.set_defaults(func=cmd_archive)
 
     e = sub.add_parser("eval", help="run golden eval")
-    e.add_argument("--mode", choices=["semantic", "hybrid"], default="hybrid")
+    e.add_argument("--mode", choices=["semantic", "hybrid", "bm25"], default="hybrid")
     e.add_argument("--top-k", type=int, default=10)
     e.add_argument("--golden", default=None)
     e.set_defaults(func=cmd_eval)

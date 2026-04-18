@@ -24,12 +24,24 @@ def load_golden(path):
 
 
 def get_embedder():
-    from fastembed import TextEmbedding
+    try:
+        from fastembed import TextEmbedding
+    except ImportError:
+        raise ImportError(
+            "Semantic eval requires fastembed. "
+            "Install with: pip install anamnestic[semantic]"
+        )
     return TextEmbedding(model_name=EMBED_MODEL, cache_dir=FASTEMBED_CACHE)
 
 
 def get_collection():
-    import chromadb
+    try:
+        import chromadb
+    except ImportError:
+        raise ImportError(
+            "Semantic eval requires chromadb. "
+            "Install with: pip install anamnestic[semantic]"
+        )
     return chromadb.PersistentClient(path=CHROMA_DIR).get_collection(COLL)
 
 
@@ -42,9 +54,9 @@ def evaluate(queries, top_k=10, role="any", mode="semantic"):
     if mode == "semantic":
         emb = get_embedder()
         col = get_collection()
-    elif mode == "hybrid":
+    elif mode in ("hybrid", "bm25"):
         from anamnestic.db import connect
-        from anamnestic.search.hybrid import search as hybrid_search
+        from anamnestic.search.hybrid import search as hybrid_search, _bm25
         conn = connect()
 
     for q in queries:
@@ -62,6 +74,9 @@ def evaluate(queries, top_k=10, role="any", mode="semantic"):
         elif mode == "hybrid":
             rl = r if r in ("user", "assistant") else None
             hits = hybrid_search(conn, query, top_k=k, pool=50, role=rl)
+            docs = [h.text for h in hits]
+        elif mode == "bm25":
+            hits = _bm25(conn, query, k)
             docs = [h.text for h in hits]
 
         matches = 0
@@ -101,7 +116,7 @@ def main():
     ap.add_argument("--top-k", type=int, default=10)
     ap.add_argument("--role", default="any")
     ap.add_argument("--golden", default=None)
-    ap.add_argument("--mode", choices=["semantic", "hybrid"], default="semantic")
+    ap.add_argument("--mode", choices=["semantic", "hybrid", "bm25"], default="hybrid")
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 

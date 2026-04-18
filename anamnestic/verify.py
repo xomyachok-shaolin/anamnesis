@@ -5,6 +5,14 @@ from anamnestic.config import CHROMA_DIR, CHROMA_COLLECTION
 from anamnestic.db import connect
 
 
+def _chroma_available() -> bool:
+    try:
+        import chromadb  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def _chroma_count() -> int | None:
     try:
         import chromadb
@@ -49,9 +57,9 @@ def run() -> dict:
     checks["chroma_count"] = chroma
 
     # 4. Drift: embed_state vs chroma
-    if chroma is None:
+    if chroma is None and _chroma_available():
         issues.append("chroma collection unreachable")
-    elif chroma != embedded:
+    elif chroma is not None and chroma != embedded:
         issues.append(
             f"drift: embed_state has {embedded} rows, Chroma has {chroma}"
         )
@@ -93,7 +101,7 @@ def run() -> dict:
         (CHROMA_COLLECTION,),
     ).fetchone()[0]
     checks["missing_embeddings"] = missing_embed
-    if missing_embed > 100:
+    if missing_embed > 100 and _chroma_available():
         issues.append(f"{missing_embed} turns pending embedding")
 
     conn.close()

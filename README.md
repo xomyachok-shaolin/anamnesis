@@ -7,7 +7,8 @@
 Построено как слой-расширение поверх [`claude-mem`](https://github.com/thedotmack/claude-mem): переиспользует его SQLite-файл как базовую схему и добавляет собственные таблицы, индексы и сервисы. Оба сосуществуют, не конфликтуя.
 
 ```
-pip install anamnestic
+pip install anamnestic                # BM25 + temporal + graph (~50 MB)
+pip install anamnestic[semantic]      # + семантический поиск (+chromadb +fastembed)
 ```
 
 ## Зачем

@@ -85,6 +85,13 @@ def _auto_sync():
 def _init():
     global _EMB, _COL
     if _EMB is None:
+        try:
+            import fastembed  # noqa: F401
+        except ImportError:
+            raise RuntimeError(
+                "Semantic search requires fastembed and chromadb. "
+                "Install with: pip install anamnestic[semantic]"
+            )
         if not local_embed_model_ready():
             raise RuntimeError("embedding model cache is missing")
         print("[anamnestic] loading embedder + Chroma...", file=sys.stderr)

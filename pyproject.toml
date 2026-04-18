@@ -21,8 +21,6 @@ authors = [
     {name = "xomyachok-shaolin"},
 ]
 dependencies = [
-    "chromadb>=0.4",
-    "fastembed>=0.6",
     "mcp>=1.0",
     "pyyaml>=6.0",
 ]
@@ -33,6 +31,10 @@ Repository = "https://github.com/xomyachok-shaolin/anamnestic"
 Issues = "https://github.com/xomyachok-shaolin/anamnestic/issues"
 
 [project.optional-dependencies]
+semantic = [
+    "chromadb>=0.4",
+    "fastembed>=0.6",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
