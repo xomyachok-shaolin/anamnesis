@@ -97,13 +97,24 @@ def _should_skip_migration(cur, name: str) -> bool:
         return _column_exists(cur, "historical_turns", "importance")
 
     if name == "010_summary_indexing.sql":
-        return _table_exists(cur, "anamnestic_summary_state")
+        return (
+            _table_exists(cur, "anamnestic_summary_state")
+            and _column_exists(cur, "session_summaries", "summary_text")
+            and _column_exists(cur, "session_summaries", "content_session_id")
+        )
 
     if name == "011_decay.sql":
         return _column_exists(cur, "historical_turns", "archived")
 
     if name == "012_entity_graph.sql":
         return _table_exists(cur, "anamnestic_entity_edges")
+
+    if name == "013_repair_summary_columns.sql":
+        return (
+            _column_exists(cur, "session_summaries", "summary_text")
+            and _column_exists(cur, "session_summaries", "content_session_id")
+            and _table_exists(cur, "anamnestic_summary_state")
+        )
 
     return False
 
