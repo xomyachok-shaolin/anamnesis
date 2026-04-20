@@ -13,6 +13,20 @@ log = logging.getLogger(__name__)
 
 BATCH_SIZE = 200
 
+_BOILERPLATE_PREFIXES = (
+    "# AGENTS.md",
+    "# Context from my IDE",
+    "<environment_context>",
+    "<permissions",
+    "<system-reminder>",
+)
+
+
+def _is_boilerplate(text: str) -> bool:
+    """Return True if text is boilerplate/system context, not a real user prompt."""
+    stripped = text.strip()
+    return any(stripped.startswith(p) for p in _BOILERPLATE_PREFIXES)
+
 
 def summarize_session(conn, content_session_id: str) -> dict | None:
     """Generate an extractive summary for a single session.
@@ -49,16 +63,18 @@ def summarize_session(conn, content_session_id: str) -> dict | None:
 
     # --- Extract structured fields ---
 
-    # request: first user prompt
+    # request: first non-boilerplate user prompt
     user_turns = [t for t in turns if t["role"] == "user"]
-    request = user_turns[0]["text"][:1000] if user_turns else ""
+    real_user_turns = [t for t in user_turns if not _is_boilerplate(t["text"])]
+    request = real_user_turns[0]["text"][:1000] if real_user_turns else ""
 
     # completed: last assistant turn (conclusion)
     assistant_turns = [t for t in turns if t["role"] == "assistant"]
     completed = assistant_turns[-1]["text"][:1000] if assistant_turns else ""
 
-    # investigated + learned: top-importance turns (excl. first/last)
-    middle_turns = sorted(turns[1:-1], key=lambda t: t["importance"], reverse=True)
+    # investigated + learned: top-importance turns (excl. first/last), skip boilerplate
+    middle_turns = [t for t in turns[1:-1] if not _is_boilerplate(t["text"])]
+    middle_turns.sort(key=lambda t: t["importance"], reverse=True)
     top_turns = middle_turns[:5]
 
     investigated_parts = []
