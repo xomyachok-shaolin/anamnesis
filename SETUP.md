@@ -71,6 +71,7 @@
 ### Короткий маршрут
 
 1. Поставить зависимости (Bun, uv, опционально claude-mem, Python venv).
+   Выбрать install profile: `anamnestic` или `anamnestic[semantic]`.
 2. Клонировать репо, прогнать миграции.
 3. Перенести jsonl-ы на машину, если они уже есть где-то ещё.
 4. Один раз `anamnestic sync` — собрать всё прошлое.
@@ -185,15 +186,39 @@ SQL
 
 ---
 
-## 4. Python venv для расширений
+## 4. Python venv и install profile
 
 ```bash
 uv venv ~/.claude-mem/semantic-env --python 3.11
-uv pip install --python ~/.claude-mem/semantic-env/bin/python \
-    chromadb fastembed mcp pyyaml
+```
+
+Дальше выбирается только профиль установки. Команды `anamnestic search`,
+`anamnestic sync`, `mem_search` и остальные не меняются.
+
+Минимальный профиль — SQLite/FTS/BM25 + temporal + graph:
+
+```bash
+uv pip install --python ~/.claude-mem/semantic-env/bin/python anamnestic
+```
+
+Семантический профиль — тот же интерфейс плюс Chroma/fastembed:
+
+```bash
+uv pip install --python ~/.claude-mem/semantic-env/bin/python 'anamnestic[semantic]'
+```
+
+Если ставишь из git checkout, после §5 используй editable-install:
+
+```bash
+uv pip install --python ~/.claude-mem/semantic-env/bin/python -e .
+# или:
+uv pip install --python ~/.claude-mem/semantic-env/bin/python -e '.[semantic]'
 ```
 
 `sentence-transformers` не ставить — он тянет torch + CUDA. ONNX-backend через `fastembed` решает ту же задачу без гигабайт.
+В semantic extra закреплены `chromadb==0.5.23`, `fastembed==0.5.1` и
+`onnxruntime==1.24.4`: Chroma 1.x local Rust API на этой базе ловил native
+SIGSEGV при `count/get/add`, а ONNX runtime должен быть воспроизводимым.
 
 ---
 
@@ -265,6 +290,8 @@ sqlite3 ~/.claude-mem/claude-mem.db ".tables" | tr ' ' '\n' | grep -E "ext_|hist
 ```bash
 ~/.claude-mem/semantic-env/bin/python -m anamnestic.cli sync
 ```
+
+По умолчанию `sync` индексирует embedding чанком до 512 turns за запуск. Это держит systemd timer коротким и защищает long-running ONNX/Chroma процесс от native crash; повторный запуск продолжит с места. Для явного полного прохода в одном процессе можно использовать `--embed-limit 0`.
 
 В конце печатает:
 
@@ -399,7 +426,8 @@ journalctl --user -u anamnestic-sync.service -n 30
 
 ## 12. Ежедневные команды
 
-Алиас:
+Если пакет установлен через `pip/uv pip install`, команда `anamnestic` уже доступна в venv.
+Для работы прямо из checkout без editable-install можно оставить алиас:
 
 ```bash
 alias anamnestic='PYTHONPATH=$HOME/projects/anamnestic $HOME/.claude-mem/semantic-env/bin/python -m anamnestic.cli'
@@ -409,11 +437,23 @@ alias anamnestic='PYTHONPATH=$HOME/projects/anamnestic $HOME/.claude-mem/semanti
 anamnestic status            # сессии / turns / embedded / drift / last_ingest
 anamnestic verify            # integrity SQLite + FTS + drift + orphans
 anamnestic search "query" --top-k 10
-anamnestic sync              # вручную (обычно делает timer)
+anamnestic sync              # вручную (обычно делает timer; embedding чанками)
 anamnestic backup            # вручную (обычно делает timer)
 anamnestic audit --limit 20  # последние операции с timestamps
 anamnestic eval --mode hybrid
 anamnestic restore ~/anamnestic-backups/<tarball>.tar.gz
+```
+
+Обычный пользовательский режим — `ANAMNESTIC_SEMANTIC=auto`: команды те же, а
+`status`, `verify`, `search` и MCP-ответы показывают capability metadata
+(`capabilities.semantic`, `diagnostics.channels_used`). Если Chroma/fastembed
+недоступны или индекс ещё догоняется, поиск остаётся на SQLite/FTS/BM25,
+temporal и graph без смены интерфейса.
+
+Строгая проверка semantic-индекса для эксплуатации:
+
+```bash
+ANAMNESTIC_SEMANTIC=1 anamnestic verify
 ```
 
 ---
@@ -589,6 +629,7 @@ anamnestic sync
 | `ANAMNESTIC_CODEX_ROOT` | `~/.codex/sessions` | источник Codex jsonl |
 | `ANAMNESTIC_BACKUP_ROOT` | `~/anamnestic-backups` | куда бэкапить |
 | `ANAMNESTIC_BACKUP_KEEP_LAST` | `10` | ротация |
+| `ANAMNESTIC_SEMANTIC` | `auto` | `auto` использует Chroma/fastembed когда доступны; `0` отключает; `1` включает строгие semantic-проверки |
 | `ANAMNESTIC_EMBED_MODEL` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | ONNX fastembed |
 | `ANAMNESTIC_CHROMA_COLLECTION` | `history_turns` | имя коллекции |
 

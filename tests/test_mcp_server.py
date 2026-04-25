@@ -107,6 +107,21 @@ class MCPPServerTests(unittest.TestCase):
         self.assertNotIn("error", result)
         self.assertTrue(conn.closed)
 
+    def test_mem_search_semantic_disabled_returns_error_without_loading_embedder(self):
+        conn = _FakeConn()
+        with (
+            patch.object(mcp_server, "connect", return_value=conn),
+            patch.object(mcp_server, "SEMANTIC_ENABLED", False),
+            patch.object(mcp_server, "_EMB", None),
+            patch.object(mcp_server, "_COL", None),
+        ):
+            result = mcp_server.mem_search("test", mode="semantic")
+
+        self.assertEqual(result["total"], 0)
+        self.assertEqual(result["hits"], [])
+        self.assertIn("ANAMNESTIC_SEMANTIC=0", result["error"])
+        self.assertTrue(conn.closed)
+
 
 class AuditTelemetryTests(unittest.TestCase):
     def setUp(self):

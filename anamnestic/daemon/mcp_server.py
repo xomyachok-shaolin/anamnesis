@@ -34,6 +34,7 @@ Claude Code config (add to ~/.claude.json or via `claude mcp add`):
 from __future__ import annotations
 
 import functools
+import os
 import sqlite3
 import sys
 from typing import Any, Callable
@@ -42,7 +43,7 @@ from mcp.server.fastmcp import FastMCP
 
 from anamnestic.audit import audited, recent as recent_audit
 from anamnestic.threading import get_thread
-from anamnestic.config import local_embed_model_ready
+from anamnestic.config import SEMANTIC_ENABLED, local_embed_model_ready
 from anamnestic.db import connect
 from anamnestic.search.hybrid import (
     _embedder,
@@ -60,22 +61,30 @@ _COL = None
 
 
 def _auto_sync():
-    """Lightweight incremental sync: ingest new files + embed new turns.
+    """Lightweight incremental sync: ingest new files.
 
     Runs at MCP startup so data is fresh without waiting for the cron timer.
     Skips heavier enrichment (entities, threads, importance, summaries, graph)
     which run via `anamnestic sync` on a schedule.
+
+    Embedding is deliberately opt-in at MCP startup. Loading ONNX/Chroma before
+    the stdio initialize handshake can crash the native runtime and make the
+    whole MCP server disappear from the client. Scheduled `anamnestic sync`
+    remains responsible for embedding by default.
     """
     try:
         from anamnestic.db import run_migrations
         from anamnestic.ingest.incremental import run as ingest
-        from anamnestic.indexers.incremental_chroma import run as embed
 
         run_migrations()
         ing = ingest(verbose=False)
-        emb = embed(verbose=False, batch_size=64)
+        emb = {"embedded": 0, "skipped": "mcp_startup_default"}
+        if os.environ.get("ANAMNESTIC_MCP_AUTO_EMBED", "0") == "1":
+            from anamnestic.indexers.incremental_chroma import run as embed
+
+            emb = embed(verbose=False, batch_size=64)
         total_new = ing.get("new", 0) + ing.get("updated", 0)
-        if total_new > 0:
+        if total_new > 0 or emb.get("embedded", 0) > 0:
             print(f"[anamnestic] auto-sync: ingested {total_new} new turns, "
                   f"embedded {emb.get('embedded', 0)}", file=sys.stderr)
     except Exception as exc:
@@ -85,6 +94,11 @@ def _auto_sync():
 def _init():
     global _EMB, _COL
     if _EMB is None:
+        if not SEMANTIC_ENABLED:
+            raise RuntimeError(
+                "Semantic search is disabled by ANAMNESTIC_SEMANTIC=0. "
+                "Use mode='bm25' or enable semantic indexing."
+            )
         try:
             import fastembed  # noqa: F401
         except ImportError:
@@ -609,6 +623,8 @@ def mem_probe(term: str, top_sessions: int = 3) -> dict[str, Any]:
 @_audited_tool("mem_stats", summarize=_summarize_mem_stats)
 def mem_stats() -> dict[str, Any]:
     """Corpus statistics: totals and per-source/per-project breakdowns."""
+    from anamnestic.capabilities import semantic_snapshot
+
     conn = connect()
     totals = {
         "sessions": conn.execute("SELECT COUNT(*) FROM sdk_sessions").fetchone()[0],
@@ -636,12 +652,16 @@ def mem_stats() -> dict[str, Any]:
             """
         ).fetchall()
     ]
+    semantic = semantic_snapshot(conn)
     conn.close()
     return {
         "totals": totals,
         "turns_by_source": by_source,
         "turns_by_role": by_role,
         "top_projects": top_projects,
+        "capabilities": {
+            "semantic": semantic,
+        },
     }
 
 

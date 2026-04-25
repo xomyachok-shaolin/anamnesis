@@ -10,7 +10,6 @@ from typing import Iterable
 
 from anamnestic.config import (
     CHROMA_COLLECTION,
-    CHROMA_DIR,
     EMBED_MODEL,
     FASTEMBED_CACHE,
     RRF_K,
@@ -86,8 +85,9 @@ def _embedder():
 
 
 def _chroma_col():
-    import chromadb
-    return chromadb.PersistentClient(path=CHROMA_DIR).get_collection(COLL)
+    from anamnestic.chroma_store import persistent_client
+
+    return persistent_client().get_collection(COLL)
 
 
 @dataclass
@@ -114,6 +114,8 @@ class SearchDiagnostics:
     summary_hits: int = 0
     fused_total: int = 0
     reranked: bool = False
+    channels_used: list[str] = field(default_factory=list)
+    semantic: dict | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -124,6 +126,8 @@ class SearchDiagnostics:
                 "graph": self.graph_hits,
                 "summaries": self.summary_hits,
             },
+            "channels_used": self.channels_used,
+            "semantic": self.semantic,
             "fused_total": self.fused_total,
             "reranked": self.reranked,
         }
@@ -291,20 +295,31 @@ def search(
     to get the tuple explicitly.
     """
     from anamnestic.config import TEMPORAL_WEIGHT
+    from anamnestic.capabilities import semantic_snapshot
 
     diag = SearchDiagnostics()
+    diag.semantic = semantic_snapshot(conn)
+    if not local_embed_model_ready() and diag.semantic.get("status") != "unavailable":
+        diag.semantic.update({
+            "status": "not_cached",
+            "reason": "embedding model cache is missing; run sync to bootstrap it",
+        })
 
     bm25_hits = _bm25(conn, query, pool)
     summary_hits_list = _bm25_summaries(conn, query, pool // 5)
     diag.bm25_hits = len(bm25_hits)
     diag.summary_hits = len(summary_hits_list)
     bm25_hits.extend(summary_hits_list)
-    if local_embed_model_ready():
+    if diag.semantic.get("status") in {"active", "pending"}:
         try:
             emb = _embedder()
             col = _chroma_col()
             sem_hits = _semantic(emb, col, query, pool, role=role)
-        except Exception:
+        except Exception as exc:
+            diag.semantic.update({
+                "status": "error",
+                "reason": f"semantic query failed: {type(exc).__name__}: {exc}",
+            })
             sem_hits = []
     else:
         sem_hits = []
@@ -331,6 +346,17 @@ def search(
             except Exception:
                 graph_hits = []
     diag.graph_hits = len(graph_hits)
+    diag.channels_used = [
+        name
+        for name, count in (
+            ("bm25", len(bm25_hits)),
+            ("summaries", len(summary_hits_list)),
+            ("semantic", len(sem_hits)),
+            ("temporal", len(temp_hits)),
+            ("graph", len(graph_hits)),
+        )
+        if count
+    ]
 
     by_id: dict[int, Hit] = {}
     for h in bm25_hits:
@@ -396,6 +422,7 @@ def search(
         from anamnestic.search.rerank import rerank
         fused = rerank(query, fused[:RERANK_TOP_N], top_k)
         diag.reranked = True
+        diag.channels_used.append("rerank")
     else:
         fused = fused[:top_k]
 

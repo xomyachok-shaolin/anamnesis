@@ -107,7 +107,10 @@ def _should_skip_migration(cur, name: str) -> bool:
         return _column_exists(cur, "historical_turns", "archived")
 
     if name == "012_entity_graph.sql":
-        return _table_exists(cur, "anamnestic_entity_edges")
+        return (
+            _table_exists(cur, "anamnestic_entity_edges")
+            and _table_exists(cur, "anamnestic_graph_state")
+        )
 
     if name == "013_repair_summary_columns.sql":
         return (
