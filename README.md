@@ -6,10 +6,15 @@
 
 Построено как слой-расширение поверх [`claude-mem`](https://github.com/thedotmack/claude-mem): переиспользует его SQLite-файл как базовую схему и добавляет собственные таблицы, индексы и сервисы. Оба сосуществуют, не конфликтуя.
 
+```bash
+pip install anamnestic                  # один интерфейс, BM25/temporal/graph
+pip install "anamnestic[semantic]"      # тот же интерфейс + Chroma/fastembed
+anamnestic search "запрос"              # команда не меняется
 ```
-pip install anamnestic                # BM25 + temporal + graph (~50 MB)
-pip install anamnestic[semantic]      # + семантический поиск (+chromadb +fastembed)
-```
+
+Главное пользовательское отличие — install profile. Команды CLI и MCP API остаются
+одинаковыми; semantic capability подключается автоматически, если extra установлен
+и индекс догнан.
 
 ## Зачем
 
@@ -38,6 +43,9 @@ pip install anamnestic[semantic]      # + семантический поиск 
 - **Cross-encoder reranking** — ONNX MiniLM перескорирует top-20 для финальной точности
 
 Каждый ответ поиска включает диагностику по каналам.
+В обычном режиме интерфейс один: если семантический индекс недоступен или догоняет
+бэклог, поиск автоматически остаётся на BM25/temporal/graph и помечает это в
+`diagnostics.semantic` / `capabilities.semantic`, не требуя от пользователя другой команды.
 
 ## Контроль качества графа сущностей
 
@@ -71,6 +79,14 @@ anamnestic eval       # регрессионный тест по golden-запр
 anamnestic archive    # архивация старых low-importance turns
 ```
 
+`anamnestic status` и MCP `mem_stats()` показывают `capabilities.semantic`.
+`mem_search()` возвращает `diagnostics.channels_used` и `diagnostics.semantic`.
+Строгая эксплуатационная проверка semantic-индекса:
+
+```bash
+ANAMNESTIC_SEMANTIC=1 anamnestic verify
+```
+
 ## Установка
 
 Полная инструкция — установка, бэкфилл, регистрация MCP, systemd-таймеры, переезд — в **[SETUP.md](https://github.com/xomyachok-shaolin/anamnestic/blob/master/SETUP.md)**.
@@ -81,7 +97,7 @@ anamnestic archive    # архивация старых low-importance turns
 - **Turn — единица хранения.** `historical_turns` с UNIQUE-ключом `(content_session_id, turn_number)`; UPSERT не плодит дубликаты.
 - **Формат — ответственность парсера.** Добавить новый CLI-агент = написать парсер в `anamnestic/ingest/` и зарегистрировать glob.
 - **Каждая операция аудируется.** `anamnestic_audit` логирует sync/verify/backup/restore с длительностью и JSON-payload.
-- **Auto-sync при старте MCP.** Лёгкий ingest + embed при запуске сервера — данные всегда актуальны.
+- **Auto-sync при старте MCP.** Лёгкий ingest при запуске сервера; embedding выполняется scheduled/manual `sync`, чтобы native ONNX/Chroma не ломали MCP handshake.
 
 ## Тесты
 

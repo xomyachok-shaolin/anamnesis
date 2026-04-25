@@ -12,7 +12,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from anamnestic.config import CHROMA_COLLECTION, CHROMA_DIR, EMBED_MODEL, FASTEMBED_CACHE
+from anamnestic.config import CHROMA_COLLECTION, EMBED_MODEL, FASTEMBED_CACHE
 
 COLL = CHROMA_COLLECTION
 
@@ -42,7 +42,9 @@ def get_collection():
             "Semantic eval requires chromadb. "
             "Install with: pip install anamnestic[semantic]"
         )
-    return chromadb.PersistentClient(path=CHROMA_DIR).get_collection(COLL)
+    from anamnestic.chroma_store import persistent_client
+
+    return persistent_client().get_collection(COLL)
 
 
 def evaluate(queries, top_k=10, role="any", mode="semantic"):

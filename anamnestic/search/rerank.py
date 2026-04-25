@@ -71,4 +71,4 @@ def rerank(query: str, hits: list[Hit], top_k: int) -> list[Hit]:
         h.rerank_score = sc
         reranked.append(h)
 
-    return reranked
+    return reranked[:top_k]

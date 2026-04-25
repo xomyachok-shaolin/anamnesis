@@ -6,6 +6,8 @@ import sys
 from anamnestic.audit import audited, write_health, recent
 from anamnestic.db import connect
 
+DEFAULT_SYNC_EMBED_LIMIT = 512
+
 
 def _wal_checkpoint():
     conn = connect()
@@ -17,6 +19,8 @@ def _wal_checkpoint():
 
 
 def _compute_status() -> dict:
+    from anamnestic.capabilities import semantic_snapshot
+
     conn = connect()
     cur = conn.cursor()
     totals = {
@@ -37,6 +41,7 @@ def _compute_status() -> dict:
     last_ingest = cur.execute("SELECT MAX(ingested_at) FROM anamnestic_ingest_state").fetchone()[0]
     files_tracked = cur.execute("SELECT COUNT(*) FROM anamnestic_ingest_state").fetchone()[0]
     recent_audit = recent(5)
+    semantic = semantic_snapshot(conn)
     conn.close()
 
     drift = totals["turns"] - embedded
@@ -48,6 +53,9 @@ def _compute_status() -> dict:
         "files_tracked": files_tracked,
         "last_ingest": last_ingest,
         "healthy": drift == unembedded and drift >= 0,
+        "capabilities": {
+            "semantic": semantic,
+        },
         "recent_audit": recent_audit,
     }
 
@@ -69,7 +77,8 @@ def cmd_sync(args):
 
     with audited("sync") as details:
         ing = ingest(verbose=args.verbose)
-        emb = embed(verbose=args.verbose, batch_size=args.batch)
+        embed_limit = None if args.embed_limit == 0 else args.embed_limit
+        emb = embed(verbose=args.verbose, batch_size=args.batch, limit=embed_limit)
         ent = entity_backfill()
         thr = thread_compute()
         imp = importance_backfill()
@@ -110,6 +119,15 @@ def cmd_search(args):
     for h in hits:
         print(format_hit(h))
         print()
+    if getattr(hits, "diagnostics", None) is not None:
+        diag = hits.diagnostics.to_dict()
+        sem = diag.get("semantic") or {}
+        print(
+            f"# channels={','.join(diag.get('channels_used') or ['none'])} "
+            f"semantic={sem.get('status', 'unknown')}"
+            f"{' pending=' + str(sem['pending']) if sem.get('pending') is not None else ''}",
+            file=sys.stderr,
+        )
 
 
 def cmd_backup(args):
@@ -240,6 +258,12 @@ def build_parser():
     s = sub.add_parser("sync", help="incremental ingest + embed + WAL checkpoint")
     s.add_argument("--verbose", action="store_true")
     s.add_argument("--batch", type=int, default=64)
+    s.add_argument(
+        "--embed-limit",
+        type=int,
+        default=DEFAULT_SYNC_EMBED_LIMIT,
+        help="max turns to embed per sync run; 0 means unlimited",
+    )
     s.set_defaults(func=cmd_sync)
 
     st = sub.add_parser("status", help="health + drift report + recent audit")

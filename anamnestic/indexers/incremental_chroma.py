@@ -7,10 +7,11 @@ import time
 
 from anamnestic.config import (
     CHROMA_COLLECTION,
-    CHROMA_DIR,
     EMBED_MODEL,
     FASTEMBED_CACHE,
-    local_embed_model_ready,
+    SEMANTIC_ENABLED,
+    SEMANTIC_REQUIRED,
+    semantic_dependencies_available,
 )
 from anamnestic.db import connect
 
@@ -23,8 +24,9 @@ def _embedder():
 
 
 def _chroma_col():
-    import chromadb
-    client = chromadb.PersistentClient(path=CHROMA_DIR)
+    from anamnestic.chroma_store import persistent_client
+
+    client = persistent_client()
     try:
         return client.get_collection(COLL)
     except Exception:
@@ -32,6 +34,17 @@ def _chroma_col():
 
 
 def run(batch_size=64, limit=None, verbose=False):
+    if not SEMANTIC_ENABLED:
+        return {"embedded": 0, "elapsed": 0, "skipped": "semantic_disabled"}
+    if not semantic_dependencies_available():
+        if SEMANTIC_REQUIRED:
+            return {
+                "embedded": 0,
+                "elapsed": 0,
+                "error": "semantic dependencies are not installed",
+            }
+        return {"embedded": 0, "elapsed": 0, "skipped": "semantic_unavailable"}
+
     conn = connect()
     cur = conn.cursor()
 
@@ -54,14 +67,6 @@ def run(batch_size=64, limit=None, verbose=False):
         conn.close()
         return {"embedded": 0, "elapsed": 0}
 
-    if not local_embed_model_ready():
-        conn.close()
-        return {
-            "embedded": 0,
-            "elapsed": 0,
-            "error": "embedding model cache is missing",
-        }
-
     try:
         col = _chroma_col()
         emb = _embedder()
@@ -69,6 +74,12 @@ def run(batch_size=64, limit=None, verbose=False):
         list(emb.embed(["init"]))
     except Exception as exc:
         conn.close()
+        if not SEMANTIC_REQUIRED:
+            return {
+                "embedded": 0,
+                "elapsed": 0,
+                "skipped": f"semantic_unavailable: {type(exc).__name__}: {exc}",
+            }
         return {
             "embedded": 0,
             "elapsed": 0,
@@ -83,19 +94,28 @@ def run(batch_size=64, limit=None, verbose=False):
         nonlocal embedded, buf_docs, buf_ids, buf_metas, buf_turn_ids
         if not buf_docs:
             return
-        vectors = list(emb.embed(buf_docs))
-        col.add(
-            ids=buf_ids,
-            documents=buf_docs,
-            metadatas=buf_metas,
-            embeddings=[v.tolist() for v in vectors],
-        )
+        existing_ids = set((col.get(ids=buf_ids, include=[]) or {}).get("ids", []))
+        missing = [
+            (doc, doc_id, meta)
+            for doc, doc_id, meta in zip(buf_docs, buf_ids, buf_metas)
+            if doc_id not in existing_ids
+        ]
+        if missing:
+            missing_docs, missing_ids, missing_metas = zip(*missing)
+            vectors = list(emb.embed(list(missing_docs)))
+            col.add(
+                ids=list(missing_ids),
+                documents=list(missing_docs),
+                metadatas=list(missing_metas),
+                embeddings=[v.tolist() for v in vectors],
+            )
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         cur.executemany(
             "INSERT OR REPLACE INTO anamnestic_embed_state(turn_id, collection, embedded_at) "
             "VALUES (?, ?, ?)",
             [(tid, COLL, now) for tid in buf_turn_ids],
         )
+        conn.commit()
         embedded += len(buf_docs)
         buf_docs, buf_ids, buf_metas, buf_turn_ids = [], [], [], []
 

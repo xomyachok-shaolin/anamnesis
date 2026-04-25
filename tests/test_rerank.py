@@ -63,6 +63,18 @@ class RerankTests(unittest.TestCase):
         self.assertEqual(len(result), 3)
         self.assertEqual(result[0].turn_id, 1)
 
+    @patch("anamnestic.search.rerank._get_reranker")
+    def test_rerank_truncates_raw_score_results_to_top_k(self, mock_get):
+        mock_reranker = MagicMock()
+        mock_reranker.rerank.return_value = [0.9, 0.8, 0.7, 0.6]
+        mock_get.return_value = mock_reranker
+
+        hits = self._make_hits(5)
+        result = rerank("query", hits, top_k=2)
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual([h.turn_id for h in result], [1, 2])
+
 
 if __name__ == "__main__":
     unittest.main()

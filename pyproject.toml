@@ -32,8 +32,10 @@ Issues = "https://github.com/xomyachok-shaolin/anamnestic/issues"
 
 [project.optional-dependencies]
 semantic = [
-    "chromadb>=0.4",
-    "fastembed>=0.6",
+    "chromadb==0.5.23",
+    "fastembed==0.5.1",
+    "onnxruntime==1.24.4",
+    "posthog<4",
 ]
 dev = [
     "pytest>=7.0",
@@ -48,6 +50,9 @@ version = {attr = "anamnestic.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["anamnestic*"]
+
+[tool.setuptools.package-data]
+anamnestic = ["migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

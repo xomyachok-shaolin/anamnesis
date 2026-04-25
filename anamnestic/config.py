@@ -10,6 +10,10 @@ def _expand_path(value: str) -> str:
     return os.path.abspath(os.path.expanduser(os.path.expandvars(value)))
 
 
+def _env_bool(name: str, default: str = "1") -> bool:
+    return os.environ.get(name, default).strip().lower() not in {"0", "false", "no", "off"}
+
+
 # --- Data roots ---
 DATA_DIR = Path(_expand_path(os.environ.get("ANAMNESTIC_DATA_DIR", "~/.claude-mem")))
 DB_PATH = str(DATA_DIR / "claude-mem.db")
@@ -40,6 +44,11 @@ BACKUP_KEEP_LAST = int(os.environ.get("ANAMNESTIC_BACKUP_KEEP_LAST", "10"))
 
 # --- Embedding model ---
 # Version token is baked into the collection name so multiple models can coexist.
+# ANAMNESTIC_SEMANTIC defaults to "auto": use Chroma/fastembed when available,
+# but keep SQLite/FTS/BM25 workflows healthy when they are not installed yet.
+SEMANTIC_MODE = os.environ.get("ANAMNESTIC_SEMANTIC", "auto").strip().lower()
+SEMANTIC_ENABLED = SEMANTIC_MODE not in {"0", "false", "no", "off", "disabled"}
+SEMANTIC_REQUIRED = SEMANTIC_MODE in {"1", "true", "yes", "on", "required"}
 EMBED_MODEL = os.environ.get(
     "ANAMNESTIC_EMBED_MODEL",
     "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
@@ -57,7 +66,7 @@ DEFAULT_POOL = 50
 IMPORTANCE_WEIGHT = float(os.environ.get("ANAMNESTIC_IMPORTANCE_WEIGHT", "0.3"))
 
 # --- Cross-encoder reranking ---
-RERANK_ENABLED = os.environ.get("ANAMNESTIC_RERANK", "1") == "1"
+RERANK_ENABLED = SEMANTIC_ENABLED and _env_bool("ANAMNESTIC_RERANK", "1")
 RERANK_MODEL = os.environ.get(
     "ANAMNESTIC_RERANK_MODEL",
     "Xenova/ms-marco-MiniLM-L-6-v2",
@@ -79,7 +88,13 @@ GRAPH_MAX_HOPS = int(os.environ.get("ANAMNESTIC_GRAPH_MAX_HOPS", "2"))
 
 # --- Paths convenience ---
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MIGRATIONS_DIR = REPO_ROOT / "migrations"
+SOURCE_MIGRATIONS_DIR = REPO_ROOT / "migrations"
+PACKAGE_MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+MIGRATIONS_DIR = (
+    SOURCE_MIGRATIONS_DIR
+    if SOURCE_MIGRATIONS_DIR.exists()
+    else PACKAGE_MIGRATIONS_DIR
+)
 
 
 def is_project_in_scope(project: str | None) -> bool:
@@ -95,9 +110,18 @@ def is_project_in_scope(project: str | None) -> bool:
 
 
 def local_embed_model_ready() -> bool:
-    try:
-        import fastembed  # noqa: F401
-    except ImportError:
+    if not semantic_dependencies_available():
         return False
     cache_dir = Path(FASTEMBED_CACHE)
     return any(cache_dir.rglob("model_optimized.onnx"))
+
+
+def semantic_dependencies_available() -> bool:
+    if not SEMANTIC_ENABLED:
+        return False
+    try:
+        import fastembed  # noqa: F401
+        import chromadb  # noqa: F401
+    except ImportError:
+        return False
+    return True
